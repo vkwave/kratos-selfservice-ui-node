@@ -19,6 +19,7 @@ describe("release contract", () => {
 
   it("runs tests and publishes signed immutable images", () => {
     const ci = read(".github/workflows/ci.yml")
+    const format = read(".github/workflows/format.yml")
     const release = read(".github/workflows/release.yml")
 
     for (const command of [
@@ -34,6 +35,9 @@ describe("release contract", () => {
     expect(release).toContain("anchore/sbom-action@v0")
     expect(release).toContain("cosign sign --yes")
     expect(release).toContain("provenance: mode=max")
+    expect(format).toContain("actions/setup-node@v5")
+    expect(format).toContain("npm run format:check")
+    expect(format).not.toContain("actions/setup-go")
   })
 
   it("documents strict production variables and forbids runtime overlays", () => {
