@@ -6,6 +6,10 @@ This repository contains a reference implementation for Ory Kratos' in NodeJS /
 ExpressJS / Handlebars / NextJS. It implements all Ory Kratos flows (login,
 registration, account settings, account recovery, account verification).
 
+The VKWAVE fork keeps the official Ory flow and SDK behavior, and adds
+source-owned VKWAVE branding, bilingual product copy, explicit OAuth consent
+details, production security validation, and immutable signed image releases.
+
 If you only want to add authentication to your app, and not customize the login,
 registration, account recovery, ... screens, please check out the
 [Ory Kratos Quickstart](https://www.ory.com/kratos/docs/quickstart).
@@ -38,22 +42,22 @@ Ory OAuth2 requires more setup to get CSRF cookies on the `/consent` endpoint.
   API is located at. If this app and Ory Hydra are running in the same private
   network, this should be the private network address (e.g.
   `hydra-admin.svc.cluster.local`)
-- `COOKIE_SECRET` (required): Required for signing cookies. Must be a string
-  with at least 8 alphanumerical characters.
+- `COOKIE_SECRET` (required): Required for signing cookies. Must contain at
+  least 32 characters.
 - `CSRF_COOKIE_NAME` (required): Change the cookie name to match your domain
-  using the `__HOST-example.com-x-csrf-token` format.
-- `CSRF_COOKIE_SECRET` (optional): Required for the Consent route to set a CSRF
-  cookie with a hashed value. The value must be a string with at least 8
-  alphanumerical characters.
+  using a host-only `__Host-` name such as `__Host-vkwave_csrf` in production.
+- `CSRF_COOKIE_SECRET` (required): Required for the Consent route to set a CSRF
+  cookie with a hashed value. The value must contain at least 32 characters.
 - `REMEMBER_CONSENT_SESSION_FOR_SECONDS` (optional): Sets the `remember_for`
   value of the accept consent request in seconds. The default is 3600 seconds.
 - `ORY_ADMIN_API_TOKEN` (optional): When using with an Ory Network project, you
   should add the `ORY_ADMIN_API_TOKEN` for OAuth2 Consent flows.
-- `DANGEROUSLY_DISABLE_SECURE_CSRF_COOKIES` (optional) This environment
-  variables should only be used in local development when you do not have HTTPS
-  setup. This sets the CSRF cookies to `secure: false`, required for running
-  locally. When using this setting, you must also set `CSRF_COOKIE_NAME` to a
-  name without the `__Host-` prefix.
+- `AUTH_UI_ALLOW_INSECURE_DEV` (optional): Set to `true` only for local HTTP
+  development with `NODE_ENV` set to a non-production value. Production rejects
+  this mode during startup. Use a cookie name without the `__Host-` prefix only
+  in that local development mode.
+- `NODE_ENV` (required in production): Set to `production`.
+- `PORT` (optional): HTTP listener port, default `3000`.
 - `TRUSTED_CLIENT_IDS` (optional): A list of trusted client ids. They can be set
   to skip the consent screen.
 - `SESSION_EXTRA_TRAITS_ID_TOKEN` (optional): Comma-separated list of Kratos
@@ -69,10 +73,14 @@ Ory OAuth2 requires more setup to get CSRF cookies on the `/consent` endpoint.
 
   **Note:** unlike the built-in `email` / `profile` claims (which are only added
   when the OIDC client requests the corresponding scope), traits listed in these
-  env vars are propagated unconditionally into every issued token, regardless of
-  which scopes the client asked for. Only enable this when the trait should
-  always be present and its exposure to any OIDC client of this UI is
-  acceptable.
+  env vars are propagated unconditionally into every issued token. Reserved
+  claims, credentials, `metadata_admin`, and prototype-related keys are always
+  blocked. Only allowlist traits that are appropriate for every client using
+  this consent UI.
+
+For the complete deployment contract, see
+[`SECURITY-PRODUCTION.md`](./SECURITY-PRODUCTION.md). Production operators must
+not replace or bind-mount `public/`, `views/`, or compiled `lib/` at runtime.
 
 Getting TLS working:
 
