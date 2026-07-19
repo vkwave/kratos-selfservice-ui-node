@@ -11,6 +11,7 @@ import {
   RouteRegistrator,
 } from "../pkg"
 import { UserAuthCard } from "@ory/elements-markup"
+import { appendIfPresent } from "./query"
 
 export const createRecoveryRoute: RouteCreator =
   (createHelpers) => (req, res, next) => {
@@ -21,18 +22,18 @@ export const createRecoveryRoute: RouteCreator =
       createHelpers(req, res)
     res.locals.faviconUrl = faviconUrl
     res.locals.faviconType = faviconType
+    const initFlowQuery = new URLSearchParams()
+    appendIfPresent(initFlowQuery, "return_to", return_to)
     const initFlowUrl = getUrlForFlow(
       kratosBrowserUrl,
       "recovery",
-      new URLSearchParams({ return_to: return_to.toString() }),
+      initFlowQuery,
     )
 
     // The flow is used to identify the settings and registration flow and
     // return data like the csrf_token and so on.
     if (!isQuerySet(flow)) {
-      logger.debug("No flow ID found in URL query initializing login flow", {
-        query: req.query,
-      })
+      logger.debug("No flow ID found; initializing recovery flow")
       res.redirect(303, initFlowUrl)
       return
     }
@@ -40,13 +41,16 @@ export const createRecoveryRoute: RouteCreator =
     return frontend
       .getRecoveryFlow({ id: flow, cookie: req.header("cookie") })
       .then(({ data: flow }) => {
+        const initLoginQuery = new URLSearchParams()
+        appendIfPresent(
+          initLoginQuery,
+          "return_to",
+          (return_to && return_to.toString()) || flow.return_to,
+        )
         const initLoginUrl = getUrlForFlow(
           kratosBrowserUrl,
           "login",
-          new URLSearchParams({
-            return_to:
-              (return_to && return_to.toString()) || flow.return_to || "",
-          }),
+          initLoginQuery,
         )
 
         res.render("recovery", {

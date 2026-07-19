@@ -13,6 +13,7 @@ import { LoginFlow } from "@ory/client"
 import { UserAuthCard } from "@ory/elements-markup"
 import path from "path"
 import { URLSearchParams } from "url"
+import { appendIfPresent } from "./query"
 
 export const createLoginRoute: RouteCreator =
   (createHelpers) => async (req, res, next) => {
@@ -31,30 +32,21 @@ export const createLoginRoute: RouteCreator =
     const { frontend, kratosBrowserUrl, logoUrl, extraPartials } =
       createHelpers(req, res)
 
-    const initFlowQuery = new URLSearchParams({
-      aal: aal.toString(),
-      refresh: refresh.toString(),
-      return_to: return_to.toString(),
-      organization: organization.toString(),
-      via: via.toString(),
-    })
-
-    if (isQuerySet(login_challenge)) {
-      logger.debug("login_challenge found in URL query: ", { query: req.query })
-      initFlowQuery.append("login_challenge", login_challenge)
-    }
-    if (isQuerySet(identity_schema)) {
-      initFlowQuery.append("identity_schema", identity_schema)
-    }
+    const initFlowQuery = new URLSearchParams()
+    appendIfPresent(initFlowQuery, "aal", aal)
+    appendIfPresent(initFlowQuery, "refresh", refresh)
+    appendIfPresent(initFlowQuery, "return_to", return_to)
+    appendIfPresent(initFlowQuery, "organization", organization)
+    appendIfPresent(initFlowQuery, "via", via)
+    appendIfPresent(initFlowQuery, "login_challenge", login_challenge)
+    appendIfPresent(initFlowQuery, "identity_schema", identity_schema)
 
     const initFlowUrl = getUrlForFlow(kratosBrowserUrl, "login", initFlowQuery)
 
     // The flow is used to identify the settings and registration flow and
     // return data like the csrf_token and so on.
     if (!isQuerySet(flow)) {
-      logger.debug("No flow ID found in URL query initializing login flow", {
-        query: req.query,
-      })
+      logger.debug("No flow ID found; initializing login flow")
       res.redirect(303, initFlowUrl)
       return
     }
