@@ -39,7 +39,7 @@ export const createApp = (env: NodeJS.ProcessEnv = process.env): Express => {
   })
 
   app.disable("x-powered-by")
-  app.use(securityHeaders())
+  app.use(securityHeaders(env))
   app.use(middlewareLogger)
   app.use(cookieParser(security.cookieSecret))
   app.use(addFavicon(defaultConfig))
