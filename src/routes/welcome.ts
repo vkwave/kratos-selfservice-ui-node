@@ -11,7 +11,7 @@ import { CardGradient, Typography } from "@ory/elements-markup"
 
 export const createWelcomeRoute: RouteCreator =
   (createHelpers) => async (req, res) => {
-    res.locals.projectName = "Welcome to Ory"
+    res.locals.projectName = "VKWAVE Account"
 
     const { frontend } = createHelpers(req, res)
     const session = req.session
@@ -37,7 +37,7 @@ export const createWelcomeRoute: RouteCreator =
         selectedLink: "welcome",
       }),
       projectInfoText: Typography({
-        children: `Your Ory Account Experience is running at ${req.header(
+        children: `Your VKWAVE account center is running at ${req.header(
           "host",
         )}.`,
         type: "regular",
@@ -46,41 +46,35 @@ export const createWelcomeRoute: RouteCreator =
       }),
       concepts: [
         CardGradient({
-          heading: "Getting Started",
+          heading: "Account settings",
           content:
-            "Jump start your project and complete the quickstart tutorial to get a broader overview of Ory Network.",
-          action:
-            "https://www.ory.com/docs/getting-started/integrate-auth/expressjs",
-          target: "_blank",
+            "Update your profile, credentials, and verification methods.",
+          action: "settings",
+          target: "_self",
         }),
         CardGradient({
-          heading: "User flows",
+          heading: "Active sessions",
           content:
-            "Implement flows that users perform themselves as opposed to administrative intervention.",
-          action: "https://www.ory.com/docs/kratos/self-service",
-          target: "_blank",
+            "Review the identity and authentication level for this session.",
+          action: "sessions",
+          target: "_self",
         }),
         CardGradient({
-          heading: "Identities 101",
-          content:
-            "Every identity can have its own model - get to know the ins and outs of Identity Schemas.",
-          action:
-            "https://www.ory.com/docs/kratos/manage-identities/identity-schema",
-          target: "_blank",
+          heading: "Account recovery",
+          content: "Recover access using your configured recovery address.",
+          action: "recovery",
+          target: "_self",
         }),
         CardGradient({
-          heading: "Sessions",
-          content:
-            "Ory Network manages sessions for you - get to know how sessions work.",
-          action: "https://www.ory.com/docs/kratos/session-management/overview",
-          target: "_blank",
+          heading: "Email verification",
+          content: "Verify the email address associated with your identity.",
+          action: "verification",
+          target: "_self",
         }),
         CardGradient({
-          heading: "Custom UI",
-          content:
-            "Implementing these pages in your language and framework of choice is straightforward using our SDKs.",
-          action:
-            "https://www.ory.com/docs/kratos/bring-your-own-ui/configure-ory-to-use-your-ui",
+          heading: "Support",
+          content: "Get help with account access and security questions.",
+          action: "https://vkwave.com/support",
           target: "_blank",
         }),
       ].join("\n"),

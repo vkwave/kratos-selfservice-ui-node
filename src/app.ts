@@ -5,6 +5,8 @@ import cookieParser from "cookie-parser"
 import { DoubleCsrfCookieOptions, doubleCsrf } from "csrf-csrf"
 import express, { Express, Request } from "express"
 import { engine } from "express-handlebars"
+import { brandConfig } from "./brand/config"
+import { copyForLanguage } from "./brand/copy"
 import {
   addFavicon,
   defaultConfig,
@@ -36,6 +38,11 @@ export const createApp = (env: NodeJS.ProcessEnv = process.env): Express => {
   app.use(cookieParser(env.COOKIE_SECRET || ""))
   app.use(addFavicon(defaultConfig))
   app.use(detectLanguage)
+  app.use((req, res, next) => {
+    res.locals.brand = brandConfig
+    res.locals.copy = copyForLanguage(req.header("accept-language"))
+    next()
+  })
   app.use(bodyParser.urlencoded({ extended: false }))
   app.set("view engine", "hbs")
   app.engine(

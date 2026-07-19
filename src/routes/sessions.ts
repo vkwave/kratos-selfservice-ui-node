@@ -36,9 +36,9 @@ export const createSessionsRoute: RouteCreator =
     res.render("session", {
       layout: "welcome",
       sessionInfoText: Typography({
-        children: `Your browser holds an active Ory Session for ${req.header(
+        children: `Your browser holds an active VKWAVE session for ${req.header(
           "host",
-        )}${sessionText}- changing properties inside Acount Settings will be reflected in the decoded Ory Session.`,
+        )}${sessionText}- changes made in Account Settings are reflected in the decoded session below.`,
         size: "small",
         color: "foregroundMuted",
       }),

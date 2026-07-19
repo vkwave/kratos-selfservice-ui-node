@@ -49,7 +49,7 @@ export const navigationMenu = ({
         links: links,
       },
       {
-        title: "Default User Interfaces",
+        title: "VKWAVE Account",
         titleIcon: "circle-question",
         links: [
           {
