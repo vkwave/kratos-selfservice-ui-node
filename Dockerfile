@@ -37,5 +37,5 @@ COPY --chown=10001:10001 views ./views
 
 USER 10001:10001
 EXPOSE 3000
-HEALTHCHECK --interval=10s --timeout=3s --retries=6 CMD wget -q -O - http://127.0.0.1:3000/health/alive >/dev/null || exit 1
+HEALTHCHECK --interval=10s --timeout=3s --retries=6 CMD if [ -n "$TLS_CERT_PATH" ] && [ -n "$TLS_KEY_PATH" ]; then wget --no-check-certificate -q -O - https://127.0.0.1:3000/health/alive >/dev/null; else wget -q -O - http://127.0.0.1:3000/health/alive >/dev/null; fi || exit 1
 CMD ["node", "lib/index.js"]

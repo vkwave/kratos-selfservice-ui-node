@@ -4,7 +4,13 @@ import { copyForLanguage } from "../src/brand/copy"
 
 describe("brand copy", () => {
   it("selects Chinese and falls back to English", () => {
-    expect(copyForLanguage("zh-CN").signInTitle).toBe("登录 VKWAVE")
+    const chinese = copyForLanguage("zh-CN")
+    expect(chinese.signInTitle).toBe("登录 VKWAVE")
+    expect(chinese.welcomeTitle).toBe("欢迎使用 VKWAVE")
+    expect(chinese.legalLabel).toBe("法律信息")
+    expect(chinese.sessionInformation("auth.example.test", "alice")).toContain(
+      "alice",
+    )
     expect(copyForLanguage("de-DE").signInTitle).toBe("Sign in to VKWAVE")
   })
 
@@ -21,5 +27,13 @@ describe("brand copy", () => {
     expect(visibleSources).not.toMatch(
       /Welcome to the Ory|Ory Account Experience|Default User Interfaces|active Ory Session/,
     )
+  })
+
+  it("keeps danger text readable in dark mode", () => {
+    const theme = readFileSync("public/vkwave-theme.css", "utf8")
+    expect(theme).toMatch(
+      /prefers-color-scheme: dark[\s\S]*--vkwave-danger: #fca5a5/,
+    )
+    expect(theme).toContain("--vkwave-danger: #b42318;\n\n  color-scheme")
   })
 })

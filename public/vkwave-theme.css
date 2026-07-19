@@ -7,6 +7,7 @@
   --vkwave-primary-hover: #4338ca;
   --vkwave-border: #dbe2ea;
   --vkwave-danger: #b42318;
+
   color-scheme: light dark;
 }
 
@@ -19,6 +20,7 @@
     --vkwave-primary: #818cf8;
     --vkwave-primary-hover: #a5b4fc;
     --vkwave-border: #293548;
+    --vkwave-danger: #fca5a5;
   }
 }
 

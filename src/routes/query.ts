@@ -9,3 +9,6 @@ export const appendIfPresent = (
     query.set(name, value)
   }
 }
+
+export const queryStringOrFallback = (value: unknown, fallback = ""): string =>
+  typeof value === "string" && value.length > 0 ? value : fallback

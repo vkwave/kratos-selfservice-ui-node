@@ -11,7 +11,7 @@ import {
   RouteRegistrator,
 } from "../pkg"
 import { UserAuthCard } from "@ory/elements-markup"
-import { appendIfPresent } from "./query"
+import { appendIfPresent, queryStringOrFallback } from "./query"
 
 export const createRecoveryRoute: RouteCreator =
   (createHelpers) => (req, res, next) => {
@@ -45,7 +45,7 @@ export const createRecoveryRoute: RouteCreator =
         appendIfPresent(
           initLoginQuery,
           "return_to",
-          (return_to && return_to.toString()) || flow.return_to,
+          queryStringOrFallback(return_to, flow.return_to),
         )
         const initLoginUrl = getUrlForFlow(
           kratosBrowserUrl,

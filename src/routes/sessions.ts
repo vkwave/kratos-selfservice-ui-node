@@ -8,10 +8,12 @@ import {
 } from "../pkg"
 import { navigationMenu } from "../pkg/ui"
 import { CodeBox, Typography } from "@ory/elements-markup"
+import { copyForLanguage } from "../brand/copy"
 
 export const createSessionsRoute: RouteCreator =
   (createHelpers) => async (req, res) => {
-    res.locals.projectName = "Session Information"
+    const copy = copyForLanguage(req.header("accept-language"))
+    res.locals.projectName = copy.sessionTitle
     const { frontend } = createHelpers(req, res)
     const session = req.session
 
@@ -28,17 +30,13 @@ export const createSessionsRoute: RouteCreator =
       session?.identity?.traits.username ||
       ""
 
-    const sessionText =
-      identityCredentialTrait !== ""
-        ? ` and you are currently logged in as ${identityCredentialTrait} `
-        : ""
-
     res.render("session", {
       layout: "welcome",
       sessionInfoText: Typography({
-        children: `Your browser holds an active VKWAVE session for ${req.header(
-          "host",
-        )}${sessionText}- changes made in Account Settings are reflected in the decoded session below.`,
+        children: copy.sessionInformation(
+          req.header("host") || "",
+          identityCredentialTrait || undefined,
+        ),
         size: "small",
         color: "foregroundMuted",
       }),
@@ -53,16 +51,18 @@ export const createSessionsRoute: RouteCreator =
             typeof value === "object" ? JSON.stringify(value) : value
           return traits
         }, {}),
-        "signup date": session?.identity?.created_at || "",
-        "authentication level":
+        [copy.signupDateLabel]: session?.identity?.created_at || "",
+        [copy.authenticationLevelLabel]:
           session?.authenticator_assurance_level === "aal2"
-            ? "two-factor used (aal2)"
-            : "single-factor used (aal1)",
+            ? copy.twoFactorLabel
+            : copy.singleFactorLabel,
         ...(session?.expires_at && {
-          "session expires at": new Date(session?.expires_at).toUTCString(),
+          [copy.sessionExpiresAtLabel]: new Date(
+            session?.expires_at,
+          ).toUTCString(),
         }),
         ...(session?.authenticated_at && {
-          "session authenticated at": new Date(
+          [copy.sessionAuthenticatedAtLabel]: new Date(
             session?.authenticated_at,
           ).toUTCString(),
         }),
@@ -72,7 +72,7 @@ export const createSessionsRoute: RouteCreator =
       authMethods: session?.authentication_methods?.reduce<any>(
         (methods, method, i) => {
           methods.push({
-            [`authentication method used`]: `${method.method} (${
+            [copy.authenticationMethodLabel]: `${method.method} (${
               method.completed_at && new Date(method.completed_at).toUTCString()
             })`,
           })
@@ -89,6 +89,7 @@ export const createSessionsRoute: RouteCreator =
         session,
         logoutUrl,
         selectedLink: "sessions",
+        copy,
       }),
     })
   }

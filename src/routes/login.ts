@@ -13,7 +13,7 @@ import { LoginFlow } from "@ory/client"
 import { UserAuthCard } from "@ory/elements-markup"
 import path from "path"
 import { URLSearchParams } from "url"
-import { appendIfPresent } from "./query"
+import { appendIfPresent, queryStringOrFallback } from "./query"
 
 export const createLoginRoute: RouteCreator =
   (createHelpers) => async (req, res, next) => {
@@ -60,8 +60,10 @@ export const createLoginRoute: RouteCreator =
         logoutUrl = await frontend
           .createBrowserLogoutFlow({
             cookie: req.header("cookie"),
-            returnTo:
-              (return_to && return_to.toString()) || loginFlow.return_to || "",
+            returnTo: queryStringOrFallback(
+              return_to,
+              loginFlow.return_to || "",
+            ),
           })
           .then(({ data }) => data.logout_url)
         return logoutUrl
@@ -74,8 +76,7 @@ export const createLoginRoute: RouteCreator =
       // we will create a new verification flow and redirect the user to the verification page
       frontend
         .createBrowserVerificationFlow({
-          returnTo:
-            (return_to && return_to.toString()) || loginFlow.return_to || "",
+          returnTo: queryStringOrFallback(return_to, loginFlow.return_to || ""),
         })
         .then(({ headers, data: verificationFlow }) => {
           // we need the csrf cookie from the verification flow
@@ -110,10 +111,10 @@ export const createLoginRoute: RouteCreator =
               kratosBrowserUrl,
               "verification",
               new URLSearchParams({
-                return_to:
-                  (return_to && return_to.toString()) ||
-                  loginFlow.return_to ||
-                  "",
+                return_to: queryStringOrFallback(
+                  return_to,
+                  loginFlow.return_to || "",
+                ),
                 ...(loginFlow.identity_schema && {
                   identity_schema: loginFlow.identity_schema,
                 }),
@@ -136,8 +137,7 @@ export const createLoginRoute: RouteCreator =
 
         // Render the data using a view (e.g. Jade Template):
         const initRegistrationQuery = new URLSearchParams({
-          return_to:
-            (return_to && return_to.toString()) || flow.return_to || "",
+          return_to: queryStringOrFallback(return_to, flow.return_to || ""),
           ...(flow.identity_schema && {
             identity_schema: flow.identity_schema.toString(),
           }),
@@ -157,8 +157,7 @@ export const createLoginRoute: RouteCreator =
             kratosBrowserUrl,
             "recovery",
             new URLSearchParams({
-              return_to:
-                (return_to && return_to.toString()) || flow.return_to || "",
+              return_to: queryStringOrFallback(return_to, flow.return_to || ""),
             }),
           )
         }

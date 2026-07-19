@@ -11,7 +11,7 @@ import {
   RouteRegistrator,
 } from "../pkg"
 import { UserSettingsScreen } from "@ory/elements-markup"
-import { appendIfPresent } from "./query"
+import { appendIfPresent, queryStringOrFallback } from "./query"
 
 export const createSettingsRoute: RouteCreator =
   (createHelpers) => async (req, res, next) => {
@@ -43,8 +43,7 @@ export const createSettingsRoute: RouteCreator =
           (await frontend
             .createBrowserLogoutFlow({
               cookie: req.header("cookie"),
-              returnTo:
-                (return_to && return_to.toString()) || flow.return_to || "",
+              returnTo: queryStringOrFallback(return_to, flow.return_to || ""),
             })
             .then(({ data }) => data.logout_url)
             .catch(() => "")) || ""

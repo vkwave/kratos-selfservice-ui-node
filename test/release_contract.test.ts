@@ -12,6 +12,9 @@ describe("release contract", () => {
     expect(dockerfile.match(pinnedBase)).toHaveLength(3)
     expect(dockerfile).toContain("USER 10001:10001")
     expect(dockerfile).toContain("HEALTHCHECK")
+    expect(dockerfile).toContain("TLS_CERT_PATH")
+    expect(dockerfile).toContain("TLS_KEY_PATH")
+    expect(dockerfile).toContain("https://127.0.0.1:3000/health/alive")
     expect(dockerfile).toContain('CMD ["node", "lib/index.js"]')
     expect(dockerfile).toContain("ARG LINK=no")
     expect(dockerfile).toContain("node_modules/@ory/client")
@@ -32,9 +35,16 @@ describe("release contract", () => {
       expect(ci).toContain(command)
     }
     expect(release).toContain("0.23.10-vkwave.*")
-    expect(release).toContain("anchore/sbom-action@v0")
+    expect(release).toMatch(/anchore\/sbom-action@[0-9a-f]{40} # v0/)
     expect(release).toContain("cosign sign --yes")
     expect(release).toContain("provenance: mode=max")
+    const actionReferences = release
+      .split("\n")
+      .filter((line) => line.includes("uses:"))
+    expect(actionReferences.length).toBeGreaterThan(0)
+    for (const reference of actionReferences) {
+      expect(reference).toMatch(/@[0-9a-f]{40}\s+#\s+v\S+$/)
+    }
     expect(format).toContain("actions/setup-node@v5")
     expect(format).toContain("npm run format:check")
     expect(format).not.toContain("actions/setup-go")
@@ -55,6 +65,7 @@ describe("release contract", () => {
       expect(docs).toContain(variable)
     }
     expect(docs).toMatch(/must not replace.*public\/.*views\/.*lib\//is)
+    expect(docs).toMatch(/whenever their corresponding token\s+type is issued/)
     expect(docs).not.toContain("DANGEROUSLY_DISABLE_SECURE_CSRF_COOKIES")
   })
 })

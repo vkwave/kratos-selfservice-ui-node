@@ -3,6 +3,7 @@ import request from "supertest"
 import { describe, expect, it } from "vitest"
 import { createApp } from "../src/app"
 import { createLoginRoute } from "../src/routes/login"
+import { queryStringOrFallback } from "../src/routes/query"
 import { createRecoveryRoute } from "../src/routes/recovery"
 
 const testEnv = (): NodeJS.ProcessEnv => ({
@@ -51,6 +52,15 @@ describe("self-service flow routes", () => {
 
     expect(response.status).toBe(303)
     expect(location.searchParams.has("return_to")).toBe(false)
+  })
+
+  it("falls back instead of coercing repeated query values", () => {
+    expect(queryStringOrFallback(["one", "two"], "flow-target")).toBe(
+      "flow-target",
+    )
+    expect(queryStringOrFallback("query-target", "flow-target")).toBe(
+      "query-target",
+    )
   })
 
   it("does not render raw upstream error details", async () => {

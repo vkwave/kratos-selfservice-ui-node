@@ -73,10 +73,10 @@ Ory OAuth2 requires more setup to get CSRF cookies on the `/consent` endpoint.
 
   **Note:** unlike the built-in `email` / `profile` claims (which are only added
   when the OIDC client requests the corresponding scope), traits listed in these
-  env vars are propagated unconditionally into every issued token. Reserved
-  claims, credentials, `metadata_admin`, and prototype-related keys are always
-  blocked. Only allowlist traits that are appropriate for every client using
-  this consent UI.
+  env vars are propagated unconditionally whenever their corresponding token
+  type is issued. Reserved claims, credentials, `metadata_admin`, and
+  prototype-related keys are always blocked. Only allowlist traits that are
+  appropriate for every client using this consent UI.
 
 For the complete deployment contract, see
 [`SECURITY-PRODUCTION.md`](./SECURITY-PRODUCTION.md). Production operators must

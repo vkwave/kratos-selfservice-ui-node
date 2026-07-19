@@ -1,9 +1,21 @@
+import { readFileSync } from "fs"
 import { afterEach, describe, expect, it } from "vitest"
 import { consentViewModel, extractSession } from "../src/routes/consent"
 
+const originalAccessTokenTraits = process.env.SESSION_EXTRA_TRAITS_ACCESS_TOKEN
+const originalIdTokenTraits = process.env.SESSION_EXTRA_TRAITS_ID_TOKEN
+
 afterEach(() => {
-  delete process.env.SESSION_EXTRA_TRAITS_ACCESS_TOKEN
-  delete process.env.SESSION_EXTRA_TRAITS_ID_TOKEN
+  if (originalAccessTokenTraits === undefined) {
+    delete process.env.SESSION_EXTRA_TRAITS_ACCESS_TOKEN
+  } else {
+    process.env.SESSION_EXTRA_TRAITS_ACCESS_TOKEN = originalAccessTokenTraits
+  }
+  if (originalIdTokenTraits === undefined) {
+    delete process.env.SESSION_EXTRA_TRAITS_ID_TOKEN
+  } else {
+    process.env.SESSION_EXTRA_TRAITS_ID_TOKEN = originalIdTokenTraits
+  }
 })
 
 describe("Hydra consent", () => {
@@ -75,5 +87,10 @@ describe("Hydra consent", () => {
     expect(model.redirectHosts).toEqual(["127.0.0.1:3210"])
     expect(model.localhostWarning).toBe(true)
     expect(model.resources).toEqual(["https://api.example.test/mcp"])
+  })
+
+  it("separates repeated values in the consent template", () => {
+    const template = readFileSync("views/consent.hbs", "utf8")
+    expect(template.match(/#unless @last/g)).toHaveLength(3)
   })
 })

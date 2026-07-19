@@ -11,7 +11,7 @@ import {
 } from "../pkg"
 import { UiText } from "@ory/client"
 import { UserAuthCard } from "@ory/elements-markup"
-import { appendIfPresent } from "./query"
+import { appendIfPresent, queryStringOrFallback } from "./query"
 
 export const createVerificationRoute: RouteCreator =
   (createHelpers) => (req, res, next) => {
@@ -44,7 +44,7 @@ export const createVerificationRoute: RouteCreator =
           appendIfPresent(
             initRegistrationQuery,
             "return_to",
-            (return_to && return_to.toString()) || flow.return_to,
+            queryStringOrFallback(return_to, flow.return_to),
           )
           const initRegistrationUrl = getUrlForFlow(
             kratosBrowserUrl,

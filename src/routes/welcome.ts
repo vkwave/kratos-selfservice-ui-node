@@ -8,10 +8,14 @@ import {
 } from "../pkg"
 import { navigationMenu } from "../pkg/ui"
 import { CardGradient, Typography } from "@ory/elements-markup"
+import { brandConfig } from "../brand/config"
+import { copyForLanguage } from "../brand/copy"
+import { queryStringOrFallback } from "./query"
 
 export const createWelcomeRoute: RouteCreator =
   (createHelpers) => async (req, res) => {
-    res.locals.projectName = "VKWAVE Account"
+    const copy = copyForLanguage(req.header("accept-language"))
+    res.locals.projectName = copy.productAccountTitle
 
     const { frontend } = createHelpers(req, res)
     const session = req.session
@@ -23,7 +27,7 @@ export const createWelcomeRoute: RouteCreator =
         await frontend
           .createBrowserLogoutFlow({
             cookie: req.header("cookie"),
-            returnTo: (return_to && return_to.toString()) || "",
+            returnTo: queryStringOrFallback(return_to),
           })
           .catch(() => ({ data: { logout_url: "" } }))
       ).data.logout_url || ""
@@ -35,46 +39,43 @@ export const createWelcomeRoute: RouteCreator =
         session,
         logoutUrl,
         selectedLink: "welcome",
+        copy,
       }),
       projectInfoText: Typography({
-        children: `Your VKWAVE account center is running at ${req.header(
-          "host",
-        )}.`,
+        children: copy.projectInformation(req.header("host") || ""),
         type: "regular",
         size: "small",
         color: "foregroundMuted",
       }),
       concepts: [
         CardGradient({
-          heading: "Account settings",
-          content:
-            "Update your profile, credentials, and verification methods.",
+          heading: copy.accountSettingsCardTitle,
+          content: copy.accountSettingsCardDescription,
           action: "settings",
           target: "_self",
         }),
         CardGradient({
-          heading: "Active sessions",
-          content:
-            "Review the identity and authentication level for this session.",
+          heading: copy.activeSessionsCardTitle,
+          content: copy.activeSessionsCardDescription,
           action: "sessions",
           target: "_self",
         }),
         CardGradient({
-          heading: "Account recovery",
-          content: "Recover access using your configured recovery address.",
+          heading: copy.accountRecoveryCardTitle,
+          content: copy.accountRecoveryCardDescription,
           action: "recovery",
           target: "_self",
         }),
         CardGradient({
-          heading: "Email verification",
-          content: "Verify the email address associated with your identity.",
+          heading: copy.emailVerificationCardTitle,
+          content: copy.emailVerificationCardDescription,
           action: "verification",
           target: "_self",
         }),
         CardGradient({
-          heading: "Support",
-          content: "Get help with account access and security questions.",
-          action: "https://vkwave.com/support",
+          heading: copy.supportCardTitle,
+          content: copy.supportCardDescription,
+          action: brandConfig.supportUrl,
           target: "_blank",
         }),
       ].join("\n"),
