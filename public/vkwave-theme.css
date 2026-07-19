@@ -55,6 +55,40 @@ body {
   gap: 1rem;
 }
 
+.consent-summary {
+  width: 100%;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  border: 1px solid var(--vkwave-border);
+  border-radius: 0.875rem;
+  background: var(--vkwave-surface);
+}
+
+.consent-summary dl {
+  display: grid;
+  grid-template-columns: minmax(8rem, auto) 1fr;
+  gap: 0.625rem 1rem;
+}
+
+.consent-summary dt {
+  color: var(--vkwave-muted);
+}
+
+.consent-summary dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.consent-summary code + code {
+  margin-left: 0.5rem;
+}
+
+.consent-warning {
+  color: var(--vkwave-danger);
+  font-weight: 600;
+}
+
 a {
   color: var(--vkwave-primary);
 }

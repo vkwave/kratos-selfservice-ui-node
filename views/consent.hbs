@@ -1,5 +1,26 @@
 <div id="consent">
-  {{{card}}}
+<section class="consent-summary" aria-labelledby="consent-title">
+  <h1 id="consent-title">{{copy.consentTitle}}</h1>
+  <p>{{copy.consentDescription}}</p>
+  <dl>
+    <dt>{{copy.clientLabel}}</dt>
+    <dd>{{consent.clientName}}</dd>
+    <dt>{{copy.clientIDLabel}}</dt>
+    <dd><code>{{consent.clientId}}</code></dd>
+    <dt>{{copy.redirectDestination}}</dt>
+    <dd>
+      {{#each consent.redirectHosts}}<code>{{this}}</code>{{/each}}
+    </dd>
+    <dt>{{copy.requestedScopes}}</dt>
+    <dd>{{#each consent.scopes}}<code>{{this}}</code>{{/each}}</dd>
+    <dt>{{copy.requestedResource}}</dt>
+    <dd>{{#each consent.resources}}<code>{{this}}</code>{{/each}}</dd>
+  </dl>
+  {{#if consent.localhostWarning}}
+    <p role="alert" class="consent-warning">{{copy.localhostWarning}}</p>
+  {{/if}}
+</section>
+{{{card}}}
 
   {{> scripts}}
 </div>
