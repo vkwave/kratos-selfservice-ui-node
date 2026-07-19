@@ -17,6 +17,22 @@ export const parsePort = (value: string | undefined): number => {
   return port
 }
 
+export interface TLSPaths {
+  certPath: string
+  keyPath: string
+}
+
+export const parseTLSPaths = (
+  env: NodeJS.ProcessEnv = process.env,
+): TLSPaths | undefined => {
+  const certPath = env.TLS_CERT_PATH?.trim()
+  const keyPath = env.TLS_KEY_PATH?.trim()
+  if ((certPath && !keyPath) || (!certPath && keyPath)) {
+    throw new Error("TLS_CERT_PATH and TLS_KEY_PATH must be provided together")
+  }
+  return certPath && keyPath ? { certPath, keyPath } : undefined
+}
+
 const listener = (server: Server, proto: "http" | "https") => () => {
   const address = server.address()
   const port = typeof address === "object" && address ? address.port : "unknown"
@@ -25,12 +41,13 @@ const listener = (server: Server, proto: "http" | "https") => () => {
 
 export const startServer = (env: NodeJS.ProcessEnv = process.env): Server => {
   const port = parsePort(env.PORT)
+  const tls = parseTLSPaths(env)
   const app = createApp(env)
-  if (env.TLS_CERT_PATH?.length && env.TLS_KEY_PATH?.length) {
+  if (tls) {
     const server = https.createServer(
       {
-        cert: fs.readFileSync(env.TLS_CERT_PATH),
-        key: fs.readFileSync(env.TLS_KEY_PATH),
+        cert: fs.readFileSync(tls.certPath),
+        key: fs.readFileSync(tls.keyPath),
       },
       app,
     )

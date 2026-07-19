@@ -38,6 +38,17 @@ describe("release contract", () => {
     expect(release).toMatch(/anchore\/sbom-action@[0-9a-f]{40} # v0/)
     expect(release).toContain("cosign sign --yes")
     expect(release).toContain("provenance: mode=max")
+    expect(release).toContain("push-by-digest=true")
+    expect(release).not.toContain(
+      "tags: ${{ env.IMAGE }}:${{ github.ref_name }}",
+    )
+    const signIndex = release.indexOf("cosign sign --yes")
+    const tagIndex = release.indexOf("docker buildx imagetools create")
+    expect(signIndex).toBeGreaterThan(-1)
+    expect(tagIndex).toBeGreaterThan(signIndex)
+    expect(release.slice(tagIndex)).toMatch(
+      /--tag\s+"\$\{IMAGE\}:\$\{RELEASE_TAG\}"\s+"\$\{IMAGE\}@\$\{IMAGE_DIGEST\}"/,
+    )
     const actionReferences = release
       .split("\n")
       .filter((line) => line.includes("uses:"))

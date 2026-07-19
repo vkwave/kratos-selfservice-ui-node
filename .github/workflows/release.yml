@@ -38,8 +38,9 @@ jobs:
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
-          push: true
-          tags: ${{ env.IMAGE }}:${{ github.ref_name }}
+          outputs: >-
+            type=image,name=${{ env.IMAGE }},push-by-digest=true,
+            name-canonical=true,push=true
           provenance: mode=max
           sbom: true
       - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
@@ -55,3 +56,9 @@ jobs:
       - env:
           IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
         run: cosign sign --yes "${IMAGE}@${IMAGE_DIGEST}"
+      - env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: >-
+          docker buildx imagetools create --tag "${IMAGE}:${RELEASE_TAG}"
+          "${IMAGE}@${IMAGE_DIGEST}"
