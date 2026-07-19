@@ -21,7 +21,8 @@
     "build": "rm -rf lib/* && npx tsc",
     "serve": "node lib/index.js",
     "start": "nodemon",
-    "test": "exit 0",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "format:check": "prettier --check .",
     "prepublishOnly": "npm run build"
   },
@@ -54,12 +55,15 @@
     "@types/express-handlebars": "6.0.2",
     "@types/handlebars-helpers": "0.5.6",
     "@types/jwt-decode": "3.1.0",
-    "@types/node": "18.16.19",
+    "@types/node": "22.20.1",
+    "@types/supertest": "7.2.1",
     "license-checker": "25.0.1",
     "nodemon": "3.1.14",
     "prettier": "3.8.1",
+    "supertest": "7.2.2",
     "ts-node": "10.9.2",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
   },
   "overrides": {
     "express-winston": {
@@ -69,7 +73,7 @@
     "form-data": ">=4.0.6"
   },
   "engines": {
-    "node": ">=18",
-    "npm": ">=8.11.0"
+    "node": ">=22",
+    "npm": ">=10"
   }
 }

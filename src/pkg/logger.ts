@@ -25,6 +25,8 @@ const config = {
 export const logger = winston.createLogger(config)
 export const middleware = expressWinston.logger({
   winstonInstance: logger,
+  msg: (req) => `HTTP ${req.method} ${req.path}`,
+  requestWhitelist: ["method", "httpVersion", "path"],
   ignoreRoute: (req) => req.url.startsWith("/assets"),
   ignoredRoutes: [
     "/theme.css",

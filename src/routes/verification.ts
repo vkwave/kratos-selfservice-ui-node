@@ -11,6 +11,7 @@ import {
 } from "../pkg"
 import { UiText } from "@ory/client"
 import { UserAuthCard } from "@ory/elements-markup"
+import { appendIfPresent, queryStringOrFallback } from "./query"
 
 export const createVerificationRoute: RouteCreator =
   (createHelpers) => (req, res, next) => {
@@ -19,18 +20,18 @@ export const createVerificationRoute: RouteCreator =
     const { flow, return_to = "", message } = req.query
     const { frontend, kratosBrowserUrl, logoUrl } = createHelpers(req, res)
 
+    const initFlowQuery = new URLSearchParams()
+    appendIfPresent(initFlowQuery, "return_to", return_to)
     const initFlowUrl = getUrlForFlow(
       kratosBrowserUrl,
       "verification",
-      new URLSearchParams({ return_to: return_to.toString() }),
+      initFlowQuery,
     )
 
     // The flow is used to identify the settings and registration flow and
     // return data like the csrf_token and so on.
     if (!isQuerySet(flow)) {
-      logger.debug("No flow ID found in URL query initializing login flow", {
-        query: req.query,
-      })
+      logger.debug("No flow ID found; initializing verification flow")
       res.redirect(303, initFlowUrl)
       return
     }
@@ -39,13 +40,16 @@ export const createVerificationRoute: RouteCreator =
       frontend
         .getVerificationFlow({ id: flow, cookie: req.header("cookie") })
         .then(({ data: flow }) => {
+          const initRegistrationQuery = new URLSearchParams()
+          appendIfPresent(
+            initRegistrationQuery,
+            "return_to",
+            queryStringOrFallback(return_to, flow.return_to),
+          )
           const initRegistrationUrl = getUrlForFlow(
             kratosBrowserUrl,
             "registration",
-            new URLSearchParams({
-              return_to:
-                (return_to && return_to.toString()) || flow.return_to || "",
-            }),
+            initRegistrationQuery,
           )
 
           // check for custom messages in the query string

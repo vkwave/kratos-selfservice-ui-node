@@ -8,7 +8,10 @@ import {
   setSession,
 } from "../pkg"
 import { oidcConformityMaybeFakeSession } from "./stub/oidc-cert"
-import { AcceptOAuth2ConsentRequestSession } from "@ory/client"
+import {
+  AcceptOAuth2ConsentRequestSession,
+  OAuth2ConsentRequest,
+} from "@ory/client"
 import { UserConsentCard } from "@ory/elements-markup"
 import { Request, Response, NextFunction } from "express"
 
@@ -24,22 +27,7 @@ const parseTraitList = (raw: string | undefined): string[] => {
     .filter((s) => s.length > 0)
 }
 
-const copyTraitsInto = (
-  target: Record<string, unknown>,
-  traits: Record<string, unknown> | undefined,
-  names: string[],
-): void => {
-  if (!traits) {
-    return
-  }
-  for (const name of names) {
-    if (Object.prototype.hasOwnProperty.call(traits, name)) {
-      target[name] = traits[name]
-    }
-  }
-}
-
-const extractSession = (
+export const extractSession = (
   req: Request,
   grantScope: string[],
 ): AcceptOAuth2ConsentRequestSession => {
@@ -53,60 +41,119 @@ const extractSession = (
     return session
   }
 
+  const traits =
+    identity.traits && typeof identity.traits === "object"
+      ? (identity.traits as Record<string, unknown>)
+      : {}
+  const safe: Record<string, unknown> = {}
   if (grantScope.includes("email")) {
-    const addresses = identity.verifiable_addresses || []
-    if (addresses.length > 0) {
-      const address = addresses[0]
-      if (address.via === "email") {
-        session.id_token.email = address.value
-        session.id_token.email_verified = address.verified
-      }
+    const email = identity.verifiable_addresses?.find(
+      (address) => address.via === "email",
+    )
+    if (email) {
+      safe.email = email.value
+      safe.email_verified = email.verified
     }
   }
 
   if (grantScope.includes("profile")) {
-    if (identity.traits.username) {
-      session.id_token.preferred_username = identity.traits.username
+    if (typeof traits.username === "string") {
+      safe.preferred_username = traits.username
     }
-
-    if (identity.traits.website) {
-      session.id_token.website = identity.traits.website
+    if (typeof traits.website === "string") {
+      safe.website = traits.website
     }
-
-    if (typeof identity.traits.name === "object") {
-      if (identity.traits.name.first) {
-        session.id_token.given_name = identity.traits.name.first
-      }
-      if (identity.traits.name.last) {
-        session.id_token.family_name = identity.traits.name.last
-      }
-    } else if (typeof identity.traits.name === "string") {
-      session.id_token.name = identity.traits.name
+    if (typeof traits.name === "string") {
+      safe.name = traits.name
+    } else if (traits.name && typeof traits.name === "object") {
+      const name = traits.name as { first?: unknown; last?: unknown }
+      if (typeof name.first === "string") safe.given_name = name.first
+      if (typeof name.last === "string") safe.family_name = name.last
     }
-
     if (identity.updated_at) {
-      session.id_token.updated_at = parseInt(
-        (Date.parse(identity.updated_at) / 1000).toFixed(0),
-      )
+      const updatedAt = Date.parse(identity.updated_at)
+      if (Number.isFinite(updatedAt)) {
+        safe.updated_at = Math.floor(updatedAt / 1000)
+      }
     }
   }
+  Object.assign(session.id_token, safe)
+  Object.assign(session.access_token, safe)
 
-  // Propagate additional identity traits into the session tokens, based on
-  // operator-provided allowlists. Applied unconditionally (no scope gate) so
-  // downstream apps get the trait even when the OIDC client requested only
-  // openid. Missing traits are skipped silently.
-  copyTraitsInto(
+  const reserved = new Set([
+    "sub",
+    "iss",
+    "aud",
+    "exp",
+    "iat",
+    "client_id",
+    "scope",
+    "metadata_admin",
+    "credentials",
+    "__proto__",
+    "constructor",
+    "prototype",
+  ])
+  const copyAllowedTraits = (
+    target: Record<string, unknown>,
+    rawNames: string | undefined,
+  ): void => {
+    for (const name of parseTraitList(rawNames)) {
+      if (
+        reserved.has(name) ||
+        Object.prototype.hasOwnProperty.call(target, name)
+      ) {
+        continue
+      }
+      if (Object.prototype.hasOwnProperty.call(traits, name)) {
+        target[name] = traits[name]
+      }
+    }
+  }
+  copyAllowedTraits(
     session.id_token as Record<string, unknown>,
-    identity.traits as Record<string, unknown> | undefined,
-    parseTraitList(process.env.SESSION_EXTRA_TRAITS_ID_TOKEN),
+    process.env.SESSION_EXTRA_TRAITS_ID_TOKEN,
   )
-  copyTraitsInto(
+  copyAllowedTraits(
     session.access_token as Record<string, unknown>,
-    identity.traits as Record<string, unknown> | undefined,
-    parseTraitList(process.env.SESSION_EXTRA_TRAITS_ACCESS_TOKEN),
+    process.env.SESSION_EXTRA_TRAITS_ACCESS_TOKEN,
   )
 
   return session
+}
+
+export interface ConsentViewModel {
+  clientName: string
+  clientId: string
+  redirectHosts: string[]
+  scopes: string[]
+  resources: string[]
+  localhostWarning: boolean
+}
+
+export const consentViewModel = (
+  request: OAuth2ConsentRequest,
+): ConsentViewModel => {
+  const redirectHosts = (request.client?.redirect_uris ?? []).flatMap((uri) => {
+    try {
+      return [new URL(uri).host]
+    } catch {
+      return []
+    }
+  })
+  return {
+    clientName:
+      request.client?.client_name ||
+      request.client?.client_id ||
+      "Unknown client",
+    clientId: request.client?.client_id || "",
+    redirectHosts,
+    scopes: request.requested_scope ?? [],
+    resources: request.requested_access_token_audience ?? [],
+    localhostWarning: redirectHosts.some((host) =>
+      /^(localhost|127\.0\.0\.1|\[::1\])(?::|$)/.test(host),
+    ),
+  }
 }
 
 // A simple express handler that shows the Hydra consent screen.
@@ -192,6 +239,7 @@ export const createConsentRoute: RouteCreator =
 
         // If consent can't be skipped we MUST show the consent UI.
         res.render("consent", {
+          consent: consentViewModel(body),
           card: UserConsentCard({
             consent: body,
             csrfToken: req.csrfToken(true),

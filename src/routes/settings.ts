@@ -11,6 +11,7 @@ import {
   RouteRegistrator,
 } from "../pkg"
 import { UserSettingsScreen } from "@ory/elements-markup"
+import { appendIfPresent, queryStringOrFallback } from "./query"
 
 export const createSettingsRoute: RouteCreator =
   (createHelpers) => async (req, res, next) => {
@@ -19,18 +20,18 @@ export const createSettingsRoute: RouteCreator =
     const { flow, return_to = "" } = req.query
     const helpers = createHelpers(req, res)
     const { frontend, kratosBrowserUrl } = helpers
+    const initFlowQuery = new URLSearchParams()
+    appendIfPresent(initFlowQuery, "return_to", return_to)
     const initFlowUrl = getUrlForFlow(
       kratosBrowserUrl,
       "settings",
-      new URLSearchParams({ return_to: return_to.toString() }),
+      initFlowQuery,
     )
 
     // The flow is used to identify the settings and registration flow and
     // return data like the csrf_token and so on.
     if (!isQuerySet(flow)) {
-      logger.debug("No flow ID found in URL query initializing login flow", {
-        query: req.query,
-      })
+      logger.debug("No flow ID found; initializing settings flow")
       res.redirect(303, initFlowUrl)
       return
     }
@@ -42,8 +43,7 @@ export const createSettingsRoute: RouteCreator =
           (await frontend
             .createBrowserLogoutFlow({
               cookie: req.header("cookie"),
-              returnTo:
-                (return_to && return_to.toString()) || flow.return_to || "",
+              returnTo: queryStringOrFallback(return_to, flow.return_to || ""),
             })
             .then(({ data }) => data.logout_url)
             .catch(() => "")) || ""

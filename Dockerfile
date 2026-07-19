@@ -1,28 +1,41 @@
-FROM node:18.12.1-alpine
+FROM node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2 AS dependencies
 
-RUN mkdir -p /usr/src/app
 WORKDIR /usr/src/app
-
-ARG LINK=no
-
-RUN adduser -S ory -D -u 10000 -s /bin/nologin
-
-COPY package.json .
-COPY package-lock.json .
-
+COPY package.json package-lock.json ./
 RUN npm ci --fetch-timeout=600000
 
-COPY . /usr/src/app
+FROM node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2 AS build
 
-RUN if [ "$LINK" == "true" ]; then (cd ./contrib/sdk/generated; rm -rf node_modules; npm ci; npm run build); \
-    cp -r ./contrib/sdk/generated/* node_modules/@ory/kratos-client/; \
-    fi
+ARG LINK=no
+WORKDIR /usr/src/app
+COPY --from=dependencies /usr/src/app/node_modules ./node_modules
+COPY package.json package-lock.json tsconfig.json ./
+COPY contrib/sdk ./contrib/sdk
+COPY src ./src
+COPY types ./types
+RUN if [ "$LINK" = "true" ]; then \
+      test -f ./contrib/sdk/generated/package.json; \
+      (cd ./contrib/sdk/generated && npm ci && npm run build); \
+      rm -rf node_modules/@ory/client/*; \
+      cp -r ./contrib/sdk/generated/* node_modules/@ory/client/; \
+    fi && \
+    npm run build && \
+    npm prune --omit=dev
 
-RUN npm run build
+FROM node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2 AS runtime
 
-USER 10000
+ENV NODE_ENV=production
+WORKDIR /usr/src/app
+RUN addgroup -S -g 10001 vkwave && \
+    adduser -S -D -H -u 10001 -G vkwave vkwave
 
-ENTRYPOINT ["/bin/sh", "-c"]
-CMD ["npm run serve"]
+COPY --from=build --chown=10001:10001 /usr/src/app/node_modules ./node_modules
+COPY --from=build --chown=10001:10001 /usr/src/app/lib ./lib
+COPY --chown=10001:10001 package.json package-lock.json ./
+COPY --chown=10001:10001 public ./public
+COPY --chown=10001:10001 views ./views
 
+USER 10001:10001
 EXPOSE 3000
+HEALTHCHECK --interval=10s --timeout=3s --retries=6 CMD if [ -n "$TLS_CERT_PATH" ] && [ -n "$TLS_KEY_PATH" ]; then wget --no-check-certificate -q -O - https://127.0.0.1:3000/health/alive >/dev/null; else wget -q -O - http://127.0.0.1:3000/health/alive >/dev/null; fi || exit 1
+CMD ["node", "lib/index.js"]

@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Session } from "@ory/client"
 import { Nav } from "@ory/elements-markup"
+import { BrandCopy } from "../brand/copy"
 
 type NavigationMenuProps = {
   navTitle: string
   session?: Session
   logoutUrl?: string
   selectedLink?: "welcome" | "sessions"
+  copy: BrandCopy
 }
 /**
  * Renders the navigation bar with state
@@ -20,16 +22,17 @@ export const navigationMenu = ({
   session,
   logoutUrl,
   selectedLink,
+  copy,
 }: NavigationMenuProps) => {
   const links = [
     {
-      name: "Overview",
+      name: copy.overviewLabel,
       href: "welcome",
       iconLeft: "house",
       selected: false,
     },
     {
-      name: "Session Information",
+      name: copy.sessionTitle,
       href: "sessions",
       iconLeft: "users-viewfinder",
       selected: false,
@@ -49,11 +52,11 @@ export const navigationMenu = ({
         links: links,
       },
       {
-        title: "Default User Interfaces",
+        title: copy.accountNavigationLabel,
         titleIcon: "circle-question",
         links: [
           {
-            name: "Sign In",
+            name: copy.signInTitle,
             href: "login",
             iconLeft: "arrow-right-to-bracket",
             iconRight: "up-right-from-square",
@@ -62,7 +65,7 @@ export const navigationMenu = ({
             target: "_blank",
           },
           {
-            name: "Sign Up",
+            name: copy.signUpLabel,
             href: "registration",
             iconLeft: "arrow-right-to-bracket",
             iconRight: "up-right-from-square",
@@ -71,7 +74,7 @@ export const navigationMenu = ({
             target: "_blank",
           },
           {
-            name: "Account Recovery",
+            name: copy.recoveryLabel,
             href: "recovery",
             iconLeft: "user-xmark",
             iconRight: "up-right-from-square",
@@ -80,7 +83,7 @@ export const navigationMenu = ({
             target: "_blank",
           },
           {
-            name: "Account Verification",
+            name: copy.verificationLabel,
             href: "verification",
             iconLeft: "user-check",
             iconRight: "up-right-from-square",
@@ -89,7 +92,7 @@ export const navigationMenu = ({
             target: "_blank",
           },
           {
-            name: "Account Settings",
+            name: copy.settingsLabel,
             href: "settings",
             iconLeft: "gear",
             iconRight: "up-right-from-square",
@@ -98,7 +101,7 @@ export const navigationMenu = ({
             target: "_blank",
           },
           {
-            name: "Log out",
+            name: copy.logoutLabel,
             href: logoutUrl || "",
             iconLeft: "arrow-right-to-bracket",
             iconRight: "up-right-from-square",

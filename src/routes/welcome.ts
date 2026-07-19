@@ -8,10 +8,14 @@ import {
 } from "../pkg"
 import { navigationMenu } from "../pkg/ui"
 import { CardGradient, Typography } from "@ory/elements-markup"
+import { brandConfig } from "../brand/config"
+import { copyForLanguage } from "../brand/copy"
+import { queryStringOrFallback } from "./query"
 
 export const createWelcomeRoute: RouteCreator =
   (createHelpers) => async (req, res) => {
-    res.locals.projectName = "Welcome to Ory"
+    const copy = copyForLanguage(req.header("accept-language"))
+    res.locals.projectName = copy.productAccountTitle
 
     const { frontend } = createHelpers(req, res)
     const session = req.session
@@ -23,7 +27,7 @@ export const createWelcomeRoute: RouteCreator =
         await frontend
           .createBrowserLogoutFlow({
             cookie: req.header("cookie"),
-            returnTo: (return_to && return_to.toString()) || "",
+            returnTo: queryStringOrFallback(return_to),
           })
           .catch(() => ({ data: { logout_url: "" } }))
       ).data.logout_url || ""
@@ -35,52 +39,43 @@ export const createWelcomeRoute: RouteCreator =
         session,
         logoutUrl,
         selectedLink: "welcome",
+        copy,
       }),
       projectInfoText: Typography({
-        children: `Your Ory Account Experience is running at ${req.header(
-          "host",
-        )}.`,
+        children: copy.projectInformation(req.header("host") || ""),
         type: "regular",
         size: "small",
         color: "foregroundMuted",
       }),
       concepts: [
         CardGradient({
-          heading: "Getting Started",
-          content:
-            "Jump start your project and complete the quickstart tutorial to get a broader overview of Ory Network.",
-          action:
-            "https://www.ory.com/docs/getting-started/integrate-auth/expressjs",
-          target: "_blank",
+          heading: copy.accountSettingsCardTitle,
+          content: copy.accountSettingsCardDescription,
+          action: "settings",
+          target: "_self",
         }),
         CardGradient({
-          heading: "User flows",
-          content:
-            "Implement flows that users perform themselves as opposed to administrative intervention.",
-          action: "https://www.ory.com/docs/kratos/self-service",
-          target: "_blank",
+          heading: copy.activeSessionsCardTitle,
+          content: copy.activeSessionsCardDescription,
+          action: "sessions",
+          target: "_self",
         }),
         CardGradient({
-          heading: "Identities 101",
-          content:
-            "Every identity can have its own model - get to know the ins and outs of Identity Schemas.",
-          action:
-            "https://www.ory.com/docs/kratos/manage-identities/identity-schema",
-          target: "_blank",
+          heading: copy.accountRecoveryCardTitle,
+          content: copy.accountRecoveryCardDescription,
+          action: "recovery",
+          target: "_self",
         }),
         CardGradient({
-          heading: "Sessions",
-          content:
-            "Ory Network manages sessions for you - get to know how sessions work.",
-          action: "https://www.ory.com/docs/kratos/session-management/overview",
-          target: "_blank",
+          heading: copy.emailVerificationCardTitle,
+          content: copy.emailVerificationCardDescription,
+          action: "verification",
+          target: "_self",
         }),
         CardGradient({
-          heading: "Custom UI",
-          content:
-            "Implementing these pages in your language and framework of choice is straightforward using our SDKs.",
-          action:
-            "https://www.ory.com/docs/kratos/bring-your-own-ui/configure-ory-to-use-your-ui",
+          heading: copy.supportCardTitle,
+          content: copy.supportCardDescription,
+          action: brandConfig.supportUrl,
           target: "_blank",
         }),
       ].join("\n"),
