@@ -143,7 +143,14 @@ describe("release contract", () => {
       packages: "write",
       "id-token": "write",
     })
-    expect(publish.env?.DOCKER_CONFIG).toBe("${{ runner.temp }}/docker-config")
+    expect(publish.env?.DOCKER_CONFIG).toBeUndefined()
+    const dockerConfigInitialization = (publish.steps ?? []).find((step) =>
+      (step.run ?? "").includes('install -d -m 0700 "$DOCKER_CONFIG"'),
+    )
+    expect(dockerConfigInitialization?.run).toContain(
+      'DOCKER_CONFIG="${RUNNER_TEMP}/docker-config"',
+    )
+    expect(dockerConfigInitialization?.run).toContain('>> "$GITHUB_ENV"')
 
     const uses = [...(verify.steps ?? []), ...(publish.steps ?? [])].flatMap(
       (step) => (step.uses ? [step.uses] : []),

@@ -46,8 +46,6 @@ jobs:
       contents: read
       packages: write
       id-token: write
-    env:
-      DOCKER_CONFIG: ${{ runner.temp }}/docker-config
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -66,7 +64,11 @@ jobs:
           git merge-base --is-ancestor HEAD origin/master
           test "$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")" = "${GITHUB_SHA}"
       - name: Initialize isolated Docker config
-        run: install -d -m 0700 "$DOCKER_CONFIG"
+        run: |
+          set -eu
+          DOCKER_CONFIG="${RUNNER_TEMP}/docker-config"
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "$GITHUB_ENV"
+          install -d -m 0700 "$DOCKER_CONFIG"
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:

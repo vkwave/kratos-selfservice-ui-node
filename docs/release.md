@@ -13,7 +13,10 @@ do not contain credentials; `docker login` prompts for them interactively.
 ```sh
 export IMAGE=ghcr.io/vkwave/kratos-selfservice-ui-node
 export RELEASE_TAG=0.23.10-vkwave.1
-export SOURCE_SHA=$(git rev-parse HEAD)
+printf 'Approved source SHA: ' >&2
+IFS= read -r SOURCE_SHA
+export SOURCE_SHA
+printf '%s\n' "$SOURCE_SHA" | grep -Eq '^[0-9a-f]{40}$'
 
 git fetch origin master --tags
 test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
