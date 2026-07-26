@@ -1,10 +1,35 @@
 import express from "express"
+import { engine } from "express-handlebars"
+import path from "path"
 import request from "supertest"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { createApp } from "../src/app"
+import { brandConfig } from "../src/brand/config"
+import { copyForLanguage } from "../src/brand/copy"
+import { handlebarsHelpers } from "../src/pkg"
+import { register404Route } from "../src/routes/404"
+import { consentViewModel, createConsentRoute } from "../src/routes/consent"
+import { createErrorRoute } from "../src/routes/error"
 import { createLoginRoute } from "../src/routes/login"
+import { createShowLogoutRoute } from "../src/routes/logout"
 import { queryStringOrFallback } from "../src/routes/query"
 import { createRecoveryRoute } from "../src/routes/recovery"
+import { createRegistrationRoute } from "../src/routes/registration"
+import { createSettingsRoute } from "../src/routes/settings"
+import { createVerificationRoute } from "../src/routes/verification"
+
+vi.mock("@ory/elements-markup", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@ory/elements-markup")>()
+  return {
+    ...actual,
+    UserAuthCard: () => "",
+    UserConsentCard: ({ client_name }: { client_name: string }) =>
+      `USER_CONSENT_CARD:${client_name}`,
+    UserErrorCard: () => "",
+    UserLogoutCard: () => "",
+    UserSettingsScreen: () => ({ Body: "", Nav: "" }),
+  }
+})
 
 const testEnv = (): NodeJS.ProcessEnv => ({
   NODE_ENV: "test",
@@ -14,9 +39,296 @@ const testEnv = (): NodeJS.ProcessEnv => ({
   CSRF_COOKIE_NAME: "vkwave_csrf_test",
 })
 
+const flow = {
+  id: "flow-1",
+  active: "",
+  expires_at: "2026-07-27T00:00:00Z",
+  issued_at: "2026-07-26T00:00:00Z",
+  request_url: "https://auth.example.test/flow",
+  return_to: "",
+  ui: {
+    action: "https://auth.example.test/submit",
+    method: "POST",
+    nodes: [],
+  },
+}
+
+const consentRequest = {
+  client: {},
+  requested_access_token_audience: [],
+  requested_scope: [],
+  skip: false,
+}
+
+const createHelpers = () =>
+  ({
+    apiBaseUrl: "https://auth.example.test",
+    frontend: {
+      createBrowserLogoutFlow: async () => ({ data: { logout_url: "" } }),
+      getLoginFlow: async () => ({ data: flow }),
+      getRecoveryFlow: async () => ({ data: flow }),
+      getRegistrationFlow: async () => ({ data: flow }),
+      getSettingsFlow: async () => ({ data: flow }),
+      getVerificationFlow: async () => ({ data: flow }),
+    },
+    identity: {},
+    isOAuthConsentRouteEnabled: () => true,
+    kratosBrowserUrl: "https://auth.example.test",
+    oauth2: {
+      getOAuth2ConsentRequest: async () => ({ data: consentRequest }),
+      getOAuth2LogoutRequest: async () => ({ data: { skip: false } }),
+    },
+    shouldSkipConsent: () => false,
+    shouldSkipLogoutConsent: () => false,
+  }) as never
+
+const createConsentHelpers = (client: {
+  client_id?: string
+  client_name?: string
+}) => {
+  const helpers = createHelpers()
+  return (() => ({
+    ...helpers,
+    oauth2: {
+      ...helpers.oauth2,
+      getOAuth2ConsentRequest: async () => ({
+        data: { ...consentRequest, client },
+      }),
+    },
+  })) as never
+}
+
+const consentClientCases = [
+  { label: "both absent", client: {}, selected: undefined },
+  {
+    label: "both empty",
+    client: { client_name: "", client_id: "" },
+    selected: undefined,
+  },
+  {
+    label: "name absent with populated ID",
+    client: { client_id: "client-id" },
+    selected: "client-id",
+  },
+  {
+    label: "name empty with populated ID",
+    client: { client_name: "", client_id: "client-id" },
+    selected: "client-id",
+  },
+  {
+    label: "populated name with ID absent",
+    client: { client_name: "Client name" },
+    selected: "Client name",
+  },
+  {
+    label: "populated name with ID empty",
+    client: { client_name: "Client name", client_id: "" },
+    selected: "Client name",
+  },
+] as const
+
+const consentLocales = [
+  { language: "en", fallback: "Unknown client" },
+  { language: "zh-CN", fallback: "未知客户端" },
+] as const
+
+const createRenderedRouteApp = (
+  route: ReturnType<
+    | typeof createConsentRoute
+    | typeof createErrorRoute
+    | typeof createLoginRoute
+    | typeof createRecoveryRoute
+    | typeof createRegistrationRoute
+    | typeof createSettingsRoute
+    | typeof createShowLogoutRoute
+    | typeof createVerificationRoute
+  >,
+  routePath: string,
+) => {
+  const app = express()
+  app.set("view engine", "hbs")
+  app.engine(
+    "hbs",
+    engine({
+      extname: "hbs",
+      layoutsDir: path.resolve("views/layouts"),
+      partialsDir: path.resolve("views/partials"),
+      defaultLayout: "auth",
+      helpers: handlebarsHelpers,
+    }),
+  )
+  app.use((req, res, next) => {
+    res.locals.brand = brandConfig
+    res.locals.copy = copyForLanguage(req.header("accept-language"))
+    res.locals.lang = req.header("accept-language")?.startsWith("zh")
+      ? "zh"
+      : "en"
+    req.csrfToken = () => "test-csrf-token"
+    next()
+  })
+  app.get(routePath, route)
+  return app
+}
+
+const expectChineseTitle = async (
+  app: express.Express,
+  url: string,
+  title: string,
+  status = 200,
+) => {
+  const response = await request(app).get(url).set("Accept-Language", "zh-CN")
+  expect(response.status, response.text).toBe(status)
+  expect(response.text).toContain(`<title>${title}</title>`)
+}
+
 describe("self-service flow routes", () => {
+  it("renders the Chinese login page title", async () => {
+    await expectChineseTitle(
+      createRenderedRouteApp(createLoginRoute(createHelpers), "/login"),
+      "/login?flow=flow-1",
+      "登录",
+    )
+  })
+
+  it("renders the Chinese registration page title", async () => {
+    await expectChineseTitle(
+      createRenderedRouteApp(
+        createRegistrationRoute(createHelpers),
+        "/registration",
+      ),
+      "/registration?flow=flow-1",
+      "创建账户",
+    )
+  })
+
+  it("renders the Chinese recovery page title", async () => {
+    await expectChineseTitle(
+      createRenderedRouteApp(createRecoveryRoute(createHelpers), "/recovery"),
+      "/recovery?flow=flow-1",
+      "恢复账户",
+    )
+  })
+
+  it("renders the Chinese verification page title", async () => {
+    await expectChineseTitle(
+      createRenderedRouteApp(
+        createVerificationRoute(createHelpers),
+        "/verification",
+      ),
+      "/verification?flow=flow-1",
+      "验证账户",
+    )
+  })
+
+  it("renders the Chinese settings page title", async () => {
+    const app = createRenderedRouteApp(
+      createSettingsRoute(createHelpers),
+      "/settings",
+    )
+    app.set("layout", "settings")
+    await expectChineseTitle(app, "/settings?flow=flow-1", "账户设置")
+  })
+
+  it("renders the Chinese logout page title", async () => {
+    await expectChineseTitle(
+      createRenderedRouteApp(createShowLogoutRoute(createHelpers), "/logout"),
+      "/logout?logout_challenge=logout-1",
+      "退出登录",
+    )
+  })
+
+  it("localizes the consent title", async () => {
+    const app = createRenderedRouteApp(
+      createConsentRoute(createHelpers),
+      "/consent",
+    )
+    const english = await request(app).get(
+      "/consent?consent_challenge=consent-1",
+    )
+    const chinese = await request(app)
+      .get("/consent?consent_challenge=consent-1")
+      .set("Accept-Language", "zh-CN")
+
+    expect(english.status).toBe(200)
+    expect(english.text).toContain("<title>Authorization consent</title>")
+    expect(chinese.status).toBe(200)
+    expect(chinese.text).toContain("<title>授权确认</title>")
+  })
+
+  it("preserves consent view-model fallback and precedence", () => {
+    for (const { label, client, selected } of consentClientCases) {
+      for (const { language, fallback } of consentLocales) {
+        const model = consentViewModel(
+          { client } as never,
+          copyForLanguage(language).unknownClientLabel,
+        )
+        expect(model.clientName, `${label} (${language})`).toBe(
+          selected ?? fallback,
+        )
+      }
+    }
+  })
+
+  it("passes consent fallback and precedence to UserConsentCard", async () => {
+    for (const { label, client, selected } of consentClientCases) {
+      for (const { language, fallback } of consentLocales) {
+        const app = createRenderedRouteApp(
+          createConsentRoute(createConsentHelpers(client)),
+          "/consent",
+        )
+        const response = await request(app)
+          .get("/consent?consent_challenge=consent-1")
+          .set("Accept-Language", language)
+        const expected = selected ?? fallback
+
+        expect(response.status, `${label} (${language})`).toBe(200)
+        expect(response.text, `${label} (${language})`).toContain(
+          `USER_CONSENT_CARD:${expected}`,
+        )
+        if (!selected) {
+          expect(response.text, `${label} (${language})`).not.toContain(
+            "Unknown Client",
+          )
+        }
+      }
+    }
+  })
+
+  it("localizes the error and not-found page titles", async () => {
+    const errorApp = createRenderedRouteApp(
+      createErrorRoute(createHelpers),
+      "/error",
+    )
+    await expectChineseTitle(errorApp, "/error", "认证错误")
+
+    const notFoundApp = express()
+    notFoundApp.set("view engine", "hbs")
+    notFoundApp.engine(
+      "hbs",
+      engine({
+        extname: "hbs",
+        layoutsDir: path.resolve("views/layouts"),
+        partialsDir: path.resolve("views/partials"),
+        defaultLayout: "auth",
+        helpers: handlebarsHelpers,
+      }),
+    )
+    notFoundApp.use((req, res, next) => {
+      res.locals.brand = brandConfig
+      res.locals.copy = copyForLanguage(req.header("accept-language"))
+      res.locals.lang = "zh"
+      next()
+    })
+    register404Route(notFoundApp)
+    await expectChineseTitle(notFoundApp, "/missing", "页面未找到", 404)
+  })
+
   it("preserves the Hydra login challenge and AAL without empty query keys", async () => {
     const app = express()
+    app.use((req, res, next) => {
+      res.locals.copy = copyForLanguage(req.header("accept-language"))
+      next()
+    })
     app.get(
       "/login",
       createLoginRoute((() => ({
@@ -39,6 +351,10 @@ describe("self-service flow routes", () => {
 
   it("omits an absent recovery return target", async () => {
     const app = express()
+    app.use((req, res, next) => {
+      res.locals.copy = copyForLanguage(req.header("accept-language"))
+      next()
+    })
     app.get(
       "/recovery",
       createRecoveryRoute((() => ({

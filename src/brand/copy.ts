@@ -1,6 +1,17 @@
 // Copyright © 2026 VKWAVE
 // SPDX-License-Identifier: Apache-2.0
 export interface BrandCopy {
+  loginPageTitle: string
+  registrationPageTitle: string
+  recoveryPageTitle: string
+  verificationPageTitle: string
+  settingsPageTitle: string
+  logoutPageTitle: string
+  consentPageTitle: string
+  errorPageTitle: string
+  notFoundTitle: string
+  notFoundReason: string
+  unknownClientLabel: string
   signInTitle: string
   accountSecurity: string
   consentTitle: string
@@ -52,6 +63,17 @@ export interface BrandCopy {
 }
 
 const english: BrandCopy = {
+  loginPageTitle: "Sign in",
+  registrationPageTitle: "Create account",
+  recoveryPageTitle: "Recover account",
+  verificationPageTitle: "Verify account",
+  settingsPageTitle: "Account settings",
+  logoutPageTitle: "Sign out",
+  consentPageTitle: "Authorization consent",
+  errorPageTitle: "Authentication error",
+  notFoundTitle: "Page not found",
+  notFoundReason: "The requested page does not exist.",
+  unknownClientLabel: "Unknown client",
   signInTitle: "Sign in to VKWAVE",
   accountSecurity: "Secure account access",
   consentTitle: "Authorize access",
@@ -117,6 +139,17 @@ const english: BrandCopy = {
 }
 
 const chinese: BrandCopy = {
+  loginPageTitle: "登录",
+  registrationPageTitle: "创建账户",
+  recoveryPageTitle: "恢复账户",
+  verificationPageTitle: "验证账户",
+  settingsPageTitle: "账户设置",
+  logoutPageTitle: "退出登录",
+  consentPageTitle: "授权确认",
+  errorPageTitle: "认证错误",
+  notFoundTitle: "页面未找到",
+  notFoundReason: "请求的页面不存在。",
+  unknownClientLabel: "未知客户端",
   signInTitle: "登录 VKWAVE",
   accountSecurity: "安全账户访问",
   consentTitle: "授权访问",

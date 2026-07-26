@@ -16,7 +16,7 @@ import { appendIfPresent, queryStringOrFallback } from "./query"
 // A simple express handler that shows the registration screen.
 export const createRegistrationRoute: RouteCreator =
   (createHelpers) => (req, res, next) => {
-    res.locals.projectName = "Create account"
+    res.locals.projectName = res.locals.copy.registrationPageTitle
 
     const {
       flow,

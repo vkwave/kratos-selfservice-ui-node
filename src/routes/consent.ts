@@ -133,6 +133,7 @@ export interface ConsentViewModel {
 
 export const consentViewModel = (
   request: OAuth2ConsentRequest,
+  unknownClientLabel = "Unknown client",
 ): ConsentViewModel => {
   const redirectHosts = (request.client?.redirect_uris ?? []).flatMap((uri) => {
     try {
@@ -145,7 +146,7 @@ export const consentViewModel = (
     clientName:
       request.client?.client_name ||
       request.client?.client_id ||
-      "Unknown client",
+      unknownClientLabel,
     clientId: request.client?.client_id || "",
     redirectHosts,
     scopes: request.requested_scope ?? [],
@@ -160,7 +161,7 @@ export const consentViewModel = (
 export const createConsentRoute: RouteCreator =
   (createHelpers) =>
   async (req: Request, res: Response, next: NextFunction) => {
-    res.locals.projectName = "Consent"
+    res.locals.projectName = res.locals.copy.consentPageTitle
 
     const {
       oauth2,
@@ -239,7 +240,7 @@ export const createConsentRoute: RouteCreator =
 
         // If consent can't be skipped we MUST show the consent UI.
         res.render("consent", {
-          consent: consentViewModel(body),
+          consent: consentViewModel(body, res.locals.copy.unknownClientLabel),
           card: UserConsentCard({
             consent: body,
             csrfToken: req.csrfToken(true),
@@ -247,7 +248,7 @@ export const createConsentRoute: RouteCreator =
             client_name:
               body.client?.client_name ||
               body.client?.client_id ||
-              "Unknown Client",
+              res.locals.copy.unknownClientLabel,
             requested_scope: body.requested_scope || [],
             client: body.client,
             action: "consent",
@@ -261,7 +262,7 @@ export const createConsentRoute: RouteCreator =
 
 export const createConsentPostRoute: RouteCreator =
   (createHelpers) => async (req, res, next) => {
-    res.locals.projectName = "Consent"
+    res.locals.projectName = res.locals.copy.consentPageTitle
     // The challenge is a hidden input field, so we have to retrieve it from the request body
     const { oauth2, isOAuthConsentRouteEnabled } = createHelpers(req, res)
 

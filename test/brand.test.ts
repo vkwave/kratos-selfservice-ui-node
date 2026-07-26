@@ -3,6 +3,28 @@ import { describe, expect, it } from "vitest"
 import { copyForLanguage } from "../src/brand/copy"
 
 describe("brand copy", () => {
+  it("defines every self-service page label in English and Chinese", () => {
+    for (const language of ["en", "zh-CN"]) {
+      const copy = copyForLanguage(language)
+      for (const key of [
+        "loginPageTitle",
+        "registrationPageTitle",
+        "recoveryPageTitle",
+        "verificationPageTitle",
+        "settingsPageTitle",
+        "logoutPageTitle",
+        "consentPageTitle",
+        "errorPageTitle",
+        "notFoundTitle",
+        "notFoundReason",
+        "unknownClientLabel",
+      ] as const) {
+        expect(copy[key]).toEqual(expect.any(String))
+        expect(copy[key].trim()).not.toBe("")
+      }
+    }
+  })
+
   it("selects Chinese and falls back to English", () => {
     const chinese = copyForLanguage("zh-CN")
     expect(chinese.signInTitle).toBe("登录 VKWAVE")
