@@ -1,8 +1,9 @@
 # Self-service releases
 
-Releases are immutable, tag-triggered GitHub Actions runs. The workflow only
-publishes a digest after the reviewed source, vulnerability scan, SPDX SBOM,
-source provenance, release provenance, and keyless signature checks complete.
+Releases are immutable, tag-triggered GitHub Actions runs. The workflow pushes
+an unaliased digest for scanning, then creates the release tag alias only after
+the reviewed source, vulnerability scan, SPDX SBOM, source provenance, release
+provenance, and keyless signature checks complete.
 
 ## Create a release tag
 
@@ -11,6 +12,7 @@ example tag and source SHA with the next approved release values. The commands
 do not contain credentials; `docker login` prompts for them interactively.
 
 ```sh
+set -eu
 export IMAGE=ghcr.io/vkwave/kratos-selfservice-ui-node
 export RELEASE_TAG=0.23.10-vkwave.1
 printf 'Approved source SHA: ' >&2
@@ -45,6 +47,7 @@ verify the GitHub OIDC identity. Set `DIGEST` to the digest printed by the
 workflow run.
 
 ```sh
+set -eu
 export IMAGE=ghcr.io/vkwave/kratos-selfservice-ui-node
 export RELEASE_TAG=0.23.10-vkwave.1
 export DIGEST=sha256:<workflow-digest>

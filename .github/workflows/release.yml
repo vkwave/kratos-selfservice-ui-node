@@ -67,8 +67,8 @@ jobs:
         run: |
           set -eu
           DOCKER_CONFIG="${RUNNER_TEMP}/docker-config"
-          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "$GITHUB_ENV"
           install -d -m 0700 "$DOCKER_CONFIG"
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "$GITHUB_ENV"
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:

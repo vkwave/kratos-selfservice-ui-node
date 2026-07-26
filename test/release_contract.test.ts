@@ -147,10 +147,25 @@ describe("release contract", () => {
     const dockerConfigInitialization = (publish.steps ?? []).find((step) =>
       (step.run ?? "").includes('install -d -m 0700 "$DOCKER_CONFIG"'),
     )
-    expect(dockerConfigInitialization?.run).toContain(
-      'DOCKER_CONFIG="${RUNNER_TEMP}/docker-config"',
+    const dockerConfigCommands = (dockerConfigInitialization?.run ?? "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "")
+    const dockerConfigCommandIndex = (pattern: RegExp): number =>
+      dockerConfigCommands.findIndex((line) => pattern.test(line))
+    const dockerConfigAssignmentIndex = dockerConfigCommandIndex(
+      /^DOCKER_CONFIG="\$\{RUNNER_TEMP\}\/docker-config"$/,
     )
-    expect(dockerConfigInitialization?.run).toContain('>> "$GITHUB_ENV"')
+    const dockerConfigInstallIndex = dockerConfigCommandIndex(
+      /^install -d -m 0700 "\$DOCKER_CONFIG"$/,
+    )
+    const dockerConfigExportIndex =
+      dockerConfigCommandIndex(/>> "\$GITHUB_ENV"$/)
+    expect(dockerConfigAssignmentIndex).toBeGreaterThanOrEqual(0)
+    expect(dockerConfigInstallIndex).toBeGreaterThan(
+      dockerConfigAssignmentIndex,
+    )
+    expect(dockerConfigExportIndex).toBeGreaterThan(dockerConfigInstallIndex)
 
     const uses = [...(verify.steps ?? []), ...(publish.steps ?? [])].flatMap(
       (step) => (step.uses ? [step.uses] : []),
