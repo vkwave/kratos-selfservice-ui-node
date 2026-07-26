@@ -8,6 +8,10 @@ on:
 env:
   IMAGE: ghcr.io/vkwave/kratos-selfservice-ui-node
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -76,6 +80,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          version: v0.35.0
       - name: Refuse an existing release image alias
         env:
           RELEASE_TAG: ${{ github.ref_name }}

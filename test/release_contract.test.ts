@@ -25,6 +25,14 @@ type Job = {
   steps?: Step[]
 }
 
+type Workflow = {
+  concurrency?: {
+    group?: string
+    "cancel-in-progress"?: boolean
+  }
+  jobs: Record<string, Job>
+}
+
 type AliasCheckOptions = {
   args?: string[]
   dockerExit?: number
@@ -83,6 +91,61 @@ const expectAliasRefused = (result: SpawnSyncReturns<string>): void => {
   expect(result.status).not.toBe(0)
 }
 
+const executableLines = (run: string): string[] =>
+  run
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.startsWith("#"))
+
+const fencedShellBlock = (markdown: string, heading: string): string => {
+  const marker = "## " + heading + "\n"
+  const exactHeadings = markdown
+    .split("\n")
+    .filter((line) => line === "## " + heading)
+  expect(exactHeadings).toHaveLength(1)
+  const start = markdown.indexOf(marker)
+  expect(start).toBeGreaterThanOrEqual(0)
+  const sectionStart = start + marker.length
+  const nextHeading = markdown.indexOf("\n## ", sectionStart)
+  const section = markdown.slice(
+    sectionStart,
+    nextHeading === -1 ? markdown.length : nextHeading,
+  )
+  const fence = "`".repeat(3)
+  const blocks = [
+    ...section.matchAll(
+      new RegExp(fence + "(?:sh|bash)\\n([\\s\\S]*?)\\n" + fence, "g"),
+    ),
+  ]
+  expect(blocks).toHaveLength(1)
+  return blocks[0][1]
+}
+
+const nonEmptyCommands = (block: string): string[] => executableLines(block)
+
+const expectExactExecutableCommandSequence = (
+  commands: string[],
+  expected: string[],
+): void => {
+  expect(commands).toEqual(expected)
+}
+
+const insertExecutableCommandAfter = (
+  commands: string[],
+  precedingCommand: string,
+  insertedCommand: string,
+): string[] => {
+  const precedingIndex = commands.indexOf(precedingCommand)
+  if (precedingIndex === -1) {
+    throw new Error(`missing insertion point: ${precedingCommand}`)
+  }
+  return [
+    ...commands.slice(0, precedingIndex + 1),
+    insertedCommand,
+    ...commands.slice(precedingIndex + 1),
+  ]
+}
+
 describe("release contract", () => {
   it("builds a pinned three-stage non-root image", () => {
     const dockerfile = read("Dockerfile")
@@ -119,7 +182,7 @@ describe("release contract", () => {
     const ci = read(".github/workflows/ci.yml")
     const format = read(".github/workflows/format.yml")
     const release = read(".github/workflows/release.yml")
-    const document = parse(release) as { jobs: Record<string, Job> }
+    const document = parse(release) as Workflow
     const verify = document.jobs.verify
     const publish = document.jobs.publish
 
@@ -133,6 +196,11 @@ describe("release contract", () => {
       expect(ci).toContain(command)
     }
     expect(release).toContain("0.23.10-vkwave.*")
+
+    expect(document.concurrency).toEqual({
+      group: "release-${{ github.ref }}",
+      "cancel-in-progress": false,
+    })
 
     expect(verify).toBeDefined()
     expect(publish).toBeDefined()
@@ -159,8 +227,9 @@ describe("release contract", () => {
     const dockerConfigInstallIndex = dockerConfigCommandIndex(
       /^install -d -m 0700 "\$DOCKER_CONFIG"$/,
     )
-    const dockerConfigExportIndex =
-      dockerConfigCommandIndex(/>> "\$GITHUB_ENV"$/)
+    const dockerConfigExportIndex = dockerConfigCommandIndex(
+      /^printf 'DOCKER_CONFIG=%s\\n' "\$DOCKER_CONFIG" >> "\$GITHUB_ENV"$/,
+    )
     expect(dockerConfigAssignmentIndex).toBeGreaterThanOrEqual(0)
     expect(dockerConfigInstallIndex).toBeGreaterThan(
       dockerConfigAssignmentIndex,
@@ -193,10 +262,18 @@ describe("release contract", () => {
     ).toBe(false)
 
     const publishSteps = publish.steps ?? []
-    const commands = publishSteps
-      .flatMap((step) => (step.run ?? "").split("\n"))
-      .map((line) => line.trim())
-      .filter((line) => line !== "" && !line.startsWith("#"))
+    const buildxSetup = publishSteps.find((step) =>
+      step.uses?.startsWith("docker/setup-buildx-action@"),
+    )
+    expect(buildxSetup).toBeDefined()
+    expect(buildxSetup?.uses).toBe(
+      "docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f",
+    )
+    expect(buildxSetup?.with?.version).toBe("v0.35.0")
+
+    const commands = publishSteps.flatMap((step) =>
+      executableLines(step.run ?? ""),
+    )
     const index = (pattern: RegExp): number =>
       commands.findIndex((line) => pattern.test(line))
     expect(index(/git fetch origin master --no-tags/)).toBeGreaterThanOrEqual(0)
@@ -238,6 +315,11 @@ describe("release contract", () => {
     const aliasIndex = stepIndex((step) =>
       /imagetools create --tag[\s\S]*RELEASE_TAG/.test(step.run ?? ""),
     )
+    const aliasDigestVerificationIndex = stepIndex((step) =>
+      /test "\$\(docker buildx imagetools inspect "\$\{IMAGE\}:\$\{RELEASE_TAG\}" --format '\{\{\.Manifest\.Digest\}\}'\)" = "\$\{IMAGE_DIGEST\}"/.test(
+        step.run ?? "",
+      ),
+    )
     const configInitIndex = stepIndex((step) =>
       (step.run ?? "").includes('install -d -m 0700 "$DOCKER_CONFIG"'),
     )
@@ -261,28 +343,46 @@ describe("release contract", () => {
     expect(signIndex).toBeGreaterThan(releaseAttestIndex)
     expect(aliasIndex).toBeGreaterThan(signIndex)
 
-    const aliasChecks = publishSteps.flatMap((step, stepIndex) =>
-      (step.run ?? "").includes(".github/scripts/assert-image-alias-absent.sh")
-        ? [stepIndex]
-        : [],
+    const aliasCommand =
+      '.github/scripts/assert-image-alias-absent.sh "${IMAGE}:${RELEASE_TAG}"'
+    const aliasCalls = publishSteps.flatMap((step, stepIndex) =>
+      executableLines(step.run ?? "")
+        .filter((line) =>
+          line.includes(".github/scripts/assert-image-alias-absent.sh"),
+        )
+        .map((line) => ({ line, stepIndex })),
     )
-    expect(aliasChecks).toHaveLength(2)
+    expect(aliasCalls.map(({ line }) => line)).toEqual([
+      aliasCommand,
+      aliasCommand,
+    ])
+    const aliasChecks = aliasCalls.map(({ stepIndex }) => stepIndex)
+    expect(new Set(aliasChecks).size).toBe(2)
     expect(aliasChecks[0]).toBeGreaterThan(loginIndex)
     expect(aliasChecks[0]).toBeLessThan(pushIndex)
     expect(aliasChecks[1]).toBeGreaterThan(signIndex)
     expect(aliasChecks[1]).toBeLessThan(aliasIndex)
+    expect(aliasDigestVerificationIndex).toBeGreaterThan(aliasIndex)
 
     expect(format).toContain("actions/setup-node@v5")
     expect(format).toContain("npm run format:check")
     expect(format).not.toContain("actions/setup-go")
   })
 
-  it("allows only a registry manifest-not-found result for a new alias", () => {
-    for (const dockerStderr of [
-      "manifest unknown: manifest unknown",
-      "manifest is not found",
-    ]) {
-      const result = runAliasCheck({ dockerStderr })
+  it("allows only the complete Buildx v0.35.0 manifest-not-found result", () => {
+    for (const [imageAlias, lineEnding] of [
+      ["ghcr.io/vkwave/kratos-selfservice-ui-node:0.23.10-vkwave.1", "\n"],
+      ["ghcr.io/vkwave/kratos-selfservice-ui-node:0.23.10-vkwave.1", "\r\n"],
+      ["ghcr.io/vkwave/network-service:0.23.10-vkwave.1", "\n"],
+      ["ghcr.io/vkwave/timeout-service:0.23.10-vkwave.1", "\n"],
+      ["ghcr.io/vkwave/EOF-service:0.23.10-vkwave.1", "\n"],
+      ["ghcr.io/vkwave/forbidden-service:0.23.10-vkwave.1", "\n"],
+    ] as const) {
+      const result = runAliasCheck({
+        args: [imageAlias],
+        dockerExit: 1,
+        dockerStderr: `ERROR: ${imageAlias}: not found${lineEnding}`,
+      })
       expect(result.error).toBeUndefined()
       expect(result.status, result.stderr).toBe(0)
     }
@@ -298,24 +398,180 @@ describe("release contract", () => {
     expect(result.stderr).toContain("release image alias already exists")
   })
 
-  it("fails closed on registry authentication, authorization, rate-limit, and network errors", () => {
+  it("fails closed on every non-allowlisted registry result", () => {
     for (const dockerStderr of [
+      "manifest unknown: manifest unknown\n",
+      "manifest is not found\r\n",
+      "ERROR: ghcr.io/vkwave/kratos-selfservice-ui-node:0.23.10-vkwave.1: not found\r",
+      "ERROR: ghcr.io/vkwave/kratos-selfservice-ui-node:0.23.10-vkwave.1\r: not found",
+      "manifest unknown: manifest unknown\nunexpected registry response",
+      "manifest unknown: manifest unknown\nmanifest is not found",
+      "manifest is not found: unexpected registry response",
+      "ERROR: manifest unknown: manifest unknown",
       "manifest unknown: unauthorized: authentication required",
+      "manifest unknown: unauthenticated request",
       "manifest unknown: denied: permission_denied",
+      "manifest unknown: forbidden: authorization failed",
+      "manifest unknown: 401 Unauthorized",
+      "manifest unknown: 403 Forbidden",
       "manifest unknown: too many requests: rate limit exceeded",
       "manifest unknown: TLS handshake timeout",
       "manifest unknown: dial tcp: no such host",
+      "manifest unknown: manifest unknown\nunexpected EOF",
+      "manifest unknown: manifest unknown\ncontext canceled",
+      "manifest unknown: manifest unknown\ncontext-canceled",
+      "manifest unknown: operation cancelled",
+      "manifest unknown: 500 Internal Server Error",
+      "manifest unknown: 502 Bad Gateway",
+      "manifest unknown: 503 Service Unavailable",
+      "unexpected registry response",
     ]) {
       expectAliasRefused(runAliasCheck({ dockerStderr }))
     }
+
+    for (const dockerExit of [124, 130, 137, 143]) {
+      expectAliasRefused(
+        runAliasCheck({
+          dockerExit,
+          dockerStderr:
+            "ERROR: ghcr.io/vkwave/kratos-selfservice-ui-node:0.23.10-vkwave.1: not found\n",
+        }),
+      )
+    }
+
+    expectAliasRefused(
+      runAliasCheck({
+        dockerExit: 0,
+        dockerStderr: "manifest unknown: manifest unknown",
+      }),
+    )
   })
 
   it("fails closed on malformed arguments and ambiguous registry errors", () => {
     expectAliasRefused(runAliasCheck({ args: [] }))
+    expectAliasRefused(
+      runAliasCheck({
+        args: [
+          "ghcr.io/vkwave/kratos-selfservice-ui-node:0.23.10-vkwave.1",
+          "unexpected-second-argument",
+        ],
+      }),
+    )
     expectAliasRefused(runAliasCheck({ args: ["not-an-image-alias"] }))
     expectAliasRefused(
       runAliasCheck({ dockerStderr: "unexpected registry response" }),
     )
+  })
+
+  it("allowlists every executable command in the release operator blocks", () => {
+    const releaseDocs = read("docs/release.md")
+    const tagCreation = fencedShellBlock(releaseDocs, "Create a release tag")
+    const completedRelease = fencedShellBlock(
+      releaseDocs,
+      "Verify a completed release",
+    )
+    const tagCommands = nonEmptyCommands(tagCreation)
+    const completedCommands = nonEmptyCommands(completedRelease)
+    const completedCommandText = completedCommands.join("\n")
+
+    const tagHelperCommand =
+      '.github/scripts/assert-image-alias-absent.sh "${IMAGE}:${RELEASE_TAG}"'
+    const tagExpectedCommands = [
+      "set -eu",
+      "printf 'Approved source SHA: ' >&2",
+      "IFS= read -r SOURCE_SHA",
+      "export SOURCE_SHA",
+      "printf '%s\\n' \"$SOURCE_SHA\" | grep -Eq '^[0-9a-f]{40}$'",
+      "git fetch origin master --tags",
+      'test "$(git rev-parse HEAD)" = "$SOURCE_SHA"',
+      'git merge-base --is-ancestor "$SOURCE_SHA" origin/master',
+      "printf '%s\\n' \"$RELEASE_TAG\" | grep -Eq '^0\\.23\\.10-vkwave\\.[0-9]+$'",
+      '! git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"',
+      'test -z "$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG")"',
+      "export DOCKER_CONFIG=$(mktemp -d)",
+      'chmod 700 "$DOCKER_CONFIG"',
+      "trap 'rm -rf \"$DOCKER_CONFIG\"' EXIT HUP INT TERM",
+      "docker login ghcr.io",
+      tagHelperCommand,
+      'git tag -s "$RELEASE_TAG" "$SOURCE_SHA" -m "Release $RELEASE_TAG"',
+      'git push origin "refs/tags/$RELEASE_TAG"',
+    ]
+    expectExactExecutableCommandSequence(tagCommands, tagExpectedCommands)
+
+    const certificateIdentityCommand =
+      '--certificate-identity "https://github.com/vkwave/kratos-selfservice-ui-node/.github/workflows/release.yml@refs/tags/${RELEASE_TAG}" \\'
+    const certificateIssuerCommand =
+      '--certificate-oidc-issuer "https://token.actions.githubusercontent.com" \\'
+    const completedExpectedCommands = [
+      "set -eu",
+      "printf 'Workflow image digest: ' >&2",
+      "IFS= read -r DIGEST",
+      "export DIGEST",
+      "printf '%s\\n' \"$DIGEST\" | grep -Eq '^sha256:[0-9a-f]{64}$'",
+      "export DOCKER_CONFIG=$(mktemp -d)",
+      'chmod 700 "$DOCKER_CONFIG"',
+      "trap 'rm -rf \"$DOCKER_CONFIG\"' EXIT HUP INT TERM",
+      "docker login ghcr.io",
+      'docker buildx imagetools inspect "${IMAGE}:${RELEASE_TAG}"',
+      'test "$(docker buildx imagetools inspect "${IMAGE}:${RELEASE_TAG}" --format \'{{.Manifest.Digest}}\')" = "$DIGEST"',
+      "cosign verify \\",
+      certificateIdentityCommand,
+      certificateIssuerCommand,
+      '"${IMAGE}@${DIGEST}"',
+      "cosign verify-attestation \\",
+      certificateIdentityCommand,
+      certificateIssuerCommand,
+      "--type https://vkwave.com/attestations/source-provenance/v1 \\",
+      '"${IMAGE}@${DIGEST}"',
+      "cosign verify-attestation \\",
+      certificateIdentityCommand,
+      certificateIssuerCommand,
+      "--type https://vkwave.com/attestations/release/v1 \\",
+      '"${IMAGE}@${DIGEST}"',
+      "cosign verify-attestation \\",
+      certificateIdentityCommand,
+      certificateIssuerCommand,
+      "--type spdxjson \\",
+      '"${IMAGE}@${DIGEST}"',
+    ]
+    expectExactExecutableCommandSequence(
+      completedCommands,
+      completedExpectedCommands,
+    )
+
+    expect(
+      completedCommandText.match(/^cosign verify-attestation \\/gm),
+    ).toHaveLength(3)
+    expect(completedCommandText.match(/--certificate-identity /g)).toHaveLength(
+      4,
+    )
+    expect(
+      completedCommandText.match(/--certificate-oidc-issuer /g),
+    ).toHaveLength(4)
+    expect(
+      completedCommandText.match(/"\$\{IMAGE\}@\$\{DIGEST\}"/g),
+    ).toHaveLength(4)
+
+    expect(() =>
+      expectExactExecutableCommandSequence(
+        insertExecutableCommandAfter(
+          tagExpectedCommands,
+          "export SOURCE_SHA",
+          `printf -v SOURCE_SHA '%s' "$(git rev-parse origin/master)"`,
+        ),
+        tagExpectedCommands,
+      ),
+    ).toThrow()
+    expect(() =>
+      expectExactExecutableCommandSequence(
+        insertExecutableCommandAfter(
+          completedExpectedCommands,
+          "export DIGEST",
+          `printf -v DIGEST '%s' "$UNREVIEWED_DIGEST"`,
+        ),
+        completedExpectedCommands,
+      ),
+    ).toThrow()
   })
 
   it("documents strict production variables and forbids runtime overlays", () => {
