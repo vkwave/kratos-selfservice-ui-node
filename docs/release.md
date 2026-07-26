@@ -1,8 +1,8 @@
 # Self-service releases
 
-Releases are immutable, tag-triggered GitHub Actions runs. The workflow pushes
-an unaliased digest for scanning, then creates the release tag alias only after
-the reviewed source, vulnerability scan, SPDX SBOM, source provenance, release
+The tag-triggered GitHub Actions workflow pushes an unaliased OCI digest for
+scanning, then creates the GHCR release tag convenience alias only after the
+reviewed source, vulnerability scan, SPDX SBOM, source provenance, release
 provenance, and keyless signature checks complete.
 
 ## Create a release tag
@@ -77,5 +77,20 @@ cosign verify-attestation \
   "${IMAGE}@${DIGEST}"
 ```
 
-The tag alias and digest must remain unchanged after verification. A failed
-workflow, an existing alias, or any verification mismatch is a release stop.
+<!-- prettier-ignore-start -->
+
+The OCI digest is the authoritative and immutable release identity. The GHCR
+release tag is a non-authoritative convenience alias that can be changed by a
+separately authorized registry writer.
+
+Deploy and record `${IMAGE}@${DIGEST}`. An alias-resolution mismatch is a
+release stop and registry-access incident; do not consume or automatically
+repair the alias.
+
+The final alias comparison verifies only the post-write resolution observed by
+the workflow. It cannot detect every external-writer overwrite: without
+conditional creation, the workflow can overwrite a writer that publishes
+between the second absence check and alias creation, and a writer can change
+the alias after comparison.
+
+<!-- prettier-ignore-end -->

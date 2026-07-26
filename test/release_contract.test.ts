@@ -1,5 +1,5 @@
-import { spawnSync, type SpawnSyncReturns } from "child_process"
-import { createHash } from "crypto"
+import { spawnSync, type SpawnSyncReturns } from "node:child_process"
+import { createHash } from "node:crypto"
 import {
   chmodSync,
   mkdirSync,
@@ -7,9 +7,9 @@ import {
   readFileSync,
   rmSync,
   writeFileSync,
-} from "fs"
-import { tmpdir } from "os"
-import { join, resolve } from "path"
+} from "node:fs"
+import { tmpdir } from "node:os"
+import { join, resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 import { parse } from "yaml"
 
@@ -17,7 +17,12 @@ const read = (path: string): string => readFileSync(path, "utf8")
 const sha256 = (path: string): string =>
   createHash("sha256").update(readFileSync(path)).digest("hex")
 
-type Step = { uses?: string; run?: string; with?: Record<string, unknown> }
+type Step = {
+  env?: Record<string, unknown>
+  uses?: string
+  run?: string
+  with?: Record<string, unknown>
+}
 type Job = {
   needs?: string | string[]
   permissions?: Record<string, string>
@@ -91,6 +96,15 @@ const expectAliasRefused = (result: SpawnSyncReturns<string>): void => {
   expect(result.status).not.toBe(0)
 }
 
+const runDigestValidation = (
+  script: string,
+  imageDigest: string,
+): SpawnSyncReturns<string> =>
+  spawnSync("sh", ["-eu", "-c", script], {
+    encoding: "utf8",
+    env: { ...process.env, IMAGE_DIGEST: imageDigest },
+  })
+
 const executableLines = (run: string): string[] =>
   run
     .split("\n")
@@ -98,14 +112,14 @@ const executableLines = (run: string): string[] =>
     .filter((line) => line !== "" && !line.startsWith("#"))
 
 const fencedShellBlock = (markdown: string, heading: string): string => {
-  const marker = "## " + heading + "\n"
-  const exactHeadings = markdown
-    .split("\n")
-    .filter((line) => line === "## " + heading)
-  expect(exactHeadings).toHaveLength(1)
-  const start = markdown.indexOf(marker)
-  expect(start).toBeGreaterThanOrEqual(0)
-  const sectionStart = start + marker.length
+  const lines = markdown.split("\n")
+  const headingLine = `## ${heading}`
+  const headingIndexes = lines.flatMap((line, index) =>
+    line === headingLine ? [index] : [],
+  )
+  expect(headingIndexes).toHaveLength(1)
+  const sectionStart =
+    lines.slice(0, headingIndexes[0] + 1).join("\n").length + 1
   const nextHeading = markdown.indexOf("\n## ", sectionStart)
   const section = markdown.slice(
     sectionStart,
@@ -120,8 +134,6 @@ const fencedShellBlock = (markdown: string, heading: string): string => {
   expect(blocks).toHaveLength(1)
   return blocks[0][1]
 }
-
-const nonEmptyCommands = (block: string): string[] => executableLines(block)
 
 const expectExactExecutableCommandSequence = (
   commands: string[],
@@ -215,10 +227,9 @@ describe("release contract", () => {
     const dockerConfigInitialization = (publish.steps ?? []).find((step) =>
       (step.run ?? "").includes('install -d -m 0700 "$DOCKER_CONFIG"'),
     )
-    const dockerConfigCommands = (dockerConfigInitialization?.run ?? "")
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line !== "")
+    const dockerConfigCommands = executableLines(
+      dockerConfigInitialization?.run ?? "",
+    )
     const dockerConfigCommandIndex = (pattern: RegExp): number =>
       dockerConfigCommands.findIndex((line) => pattern.test(line))
     const dockerConfigAssignmentIndex = dockerConfigCommandIndex(
@@ -270,6 +281,14 @@ describe("release contract", () => {
       "docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f",
     )
     expect(buildxSetup?.with?.version).toBe("v0.35.0")
+    expect(buildxSetup?.with?.["cache-binary"]).toBe(false)
+    const buildkitDriverOpts = buildxSetup?.with?.["driver-opts"]
+    expect(buildkitDriverOpts).toMatch(
+      /^image=moby\/buildkit@sha256:[0-9a-f]{64}$/,
+    )
+    expect(buildkitDriverOpts).toBe(
+      "image=moby/buildkit@sha256:2f5adac4ecd194d9f8c10b7b5d7bceb5186853db1b26e5abd3a657af0b7e26ec",
+    )
 
     const commands = publishSteps.flatMap((step) =>
       executableLines(step.run ?? ""),
@@ -362,11 +381,371 @@ describe("release contract", () => {
     expect(aliasChecks[0]).toBeLessThan(pushIndex)
     expect(aliasChecks[1]).toBeGreaterThan(signIndex)
     expect(aliasChecks[1]).toBeLessThan(aliasIndex)
-    expect(aliasDigestVerificationIndex).toBeGreaterThan(aliasIndex)
+    expect(aliasDigestVerificationIndex).toBe(aliasIndex + 1)
 
     expect(format).toContain("actions/setup-node@v5")
     expect(format).toContain("npm run format:check")
     expect(format).not.toContain("actions/setup-go")
+  })
+
+  it("validates the registry-derived digest before every authoritative consumer", () => {
+    const document = parse(read(".github/workflows/release.yml")) as Workflow
+    const publishSteps = document.jobs.publish.steps ?? []
+    const stepIndex = (predicate: (step: Step) => boolean): number =>
+      publishSteps.findIndex(predicate)
+    const pushIndex = stepIndex((step) =>
+      Object.values(step.with ?? {}).some((value) =>
+        String(value).includes("push-by-digest=true"),
+      ),
+    )
+    const scanIndex = stepIndex((step) =>
+      /trivy[\s\S]*CRITICAL,HIGH/.test(step.run ?? ""),
+    )
+    const sbomIndex = stepIndex((step) =>
+      step.uses?.startsWith("anchore/sbom-action@"),
+    )
+    const recordIndex = stepIndex((step) =>
+      /release-provenance\.json/.test(step.run ?? ""),
+    )
+    const provenanceIndex = stepIndex((step) =>
+      (step.run ?? "").includes(
+        "https://vkwave.com/attestations/source-provenance/v1",
+      ),
+    )
+    const sbomAttestIndex = stepIndex((step) =>
+      (step.run ?? "").includes("cosign attest --yes --type spdxjson"),
+    )
+    const releaseAttestIndex = stepIndex((step) =>
+      (step.run ?? "").includes("https://vkwave.com/attestations/release/v1"),
+    )
+    const signIndex = stepIndex((step) =>
+      /cosign sign --yes/.test(step.run ?? ""),
+    )
+    const aliasIndex = stepIndex((step) =>
+      /imagetools create --tag[\s\S]*RELEASE_TAG/.test(step.run ?? ""),
+    )
+    const aliasDigestVerificationIndex = stepIndex((step) =>
+      /test "\$\(docker buildx imagetools inspect "\$\{IMAGE\}:\$\{RELEASE_TAG\}" --format '\{\{\.Manifest\.Digest\}\}'\)" = "\$\{IMAGE_DIGEST\}"/.test(
+        step.run ?? "",
+      ),
+    )
+    const digestValidationIndex = stepIndex(
+      (step) => step.name === "Validate pushed image digest",
+    )
+    const digestValidationStep = publishSteps[digestValidationIndex]
+
+    expect(digestValidationIndex).toBe(pushIndex + 1)
+    for (const authorityIndex of [
+      scanIndex,
+      sbomIndex,
+      recordIndex,
+      provenanceIndex,
+      sbomAttestIndex,
+      releaseAttestIndex,
+      signIndex,
+      aliasIndex,
+      aliasDigestVerificationIndex,
+    ]) {
+      expect(authorityIndex).toBeGreaterThan(digestValidationIndex)
+    }
+
+    const buildDigestExpression = "${{ steps.build.outputs.digest }}"
+    expect(digestValidationStep?.env?.IMAGE_DIGEST).toBe(buildDigestExpression)
+    const digestValidationScript = digestValidationStep?.run ?? ""
+    expect(executableLines(digestValidationScript)).toEqual([
+      "set -eu",
+      'test -n "$IMAGE_DIGEST"',
+      'test "${#IMAGE_DIGEST}" -eq 71',
+      "printf '%s\\n' \"$IMAGE_DIGEST\" | grep -Eq '^sha256:[0-9a-f]{64}$'",
+    ])
+
+    const validDigest = `sha256:${"a".repeat(64)}`
+    expect(
+      runDigestValidation(digestValidationScript, validDigest).status,
+    ).toBe(0)
+    for (const [label, value] of [
+      ["empty", ""],
+      [
+        "tag-based",
+        "ghcr.io/vkwave/kratos-selfservice-ui-node:0.23.10-vkwave.1",
+      ],
+      ["malformed registry-derived", `sha256:${"a".repeat(63)}`],
+      ["multiline valid-prefix-plus-garbage", `${validDigest}\ngarbage`],
+    ] as const) {
+      const result = runDigestValidation(digestValidationScript, value)
+      expect(result.status, `${label}: ${result.stderr}`).not.toBe(0)
+    }
+
+    const imageDigestBindings = publishSteps.flatMap((step) =>
+      step.env?.IMAGE_DIGEST === undefined ? [] : [step.env.IMAGE_DIGEST],
+    )
+    expect(imageDigestBindings.length).toBeGreaterThan(0)
+    for (const binding of imageDigestBindings) {
+      expect(binding).toBe(buildDigestExpression)
+    }
+
+    const sbomImage = "${{ env.IMAGE }}@${{ steps.build.outputs.digest }}"
+    const imageDigestTarget = '"${IMAGE}@${IMAGE_DIGEST}"'
+    const tagOnlyTarget = '"${IMAGE}:${RELEASE_TAG}"'
+    const recordDigestArgument = '--arg imageDigest "${IMAGE_DIGEST}"'
+    const scanCommand =
+      'trivy image --exit-code 1 --severity CRITICAL,HIGH "${IMAGE}@${IMAGE_DIGEST}"'
+    const signCommand = 'cosign sign --yes "${IMAGE}@${IMAGE_DIGEST}"'
+    const aliasCreationCommand =
+      'docker buildx imagetools create --tag "${IMAGE}:${RELEASE_TAG}" "${IMAGE}@${IMAGE_DIGEST}"'
+    const aliasDigestComparisonCommand =
+      'test "$(docker buildx imagetools inspect "${IMAGE}:${RELEASE_TAG}" --format \'{{.Manifest.Digest}}\')" = "${IMAGE_DIGEST}"'
+    const sourceProvenanceAttestationCommands = [
+      "set -eu",
+      "cosign attest --yes \\",
+      "--type https://vkwave.com/attestations/source-provenance/v1 \\",
+      "--predicate source-provenance.json \\",
+      imageDigestTarget,
+    ]
+    const spdxAttestationCommands = [
+      "set -eu",
+      "cosign attest --yes --type spdxjson \\",
+      "--predicate sbom.spdx.json \\",
+      imageDigestTarget,
+    ]
+    const releaseAttestationCommands = [
+      "set -eu",
+      "cosign attest --yes \\",
+      "--type https://vkwave.com/attestations/release/v1 \\",
+      "--predicate release-provenance.json \\",
+      imageDigestTarget,
+    ]
+    const expectedAttestationCommandsByIndex: ReadonlyArray<
+      readonly [number, readonly string[]]
+    > = [
+      [provenanceIndex, sourceProvenanceAttestationCommands],
+      [sbomAttestIndex, spdxAttestationCommands],
+      [releaseAttestIndex, releaseAttestationCommands],
+    ]
+
+    const expectBuildDigestEnv = (step: Step | undefined): void => {
+      expect(step).toBeDefined()
+      expect(step?.env?.IMAGE_DIGEST).toBe(buildDigestExpression)
+    }
+
+    const expectAuthoritativeConsumersUseBuildDigest = (
+      steps: Step[],
+    ): void => {
+      const scanStep = steps[scanIndex]
+      expectBuildDigestEnv(scanStep)
+      expect(executableLines(scanStep?.run ?? "")).toEqual([
+        "set -eu",
+        scanCommand,
+      ])
+
+      expect(steps[sbomIndex]?.with?.image).toBe(sbomImage)
+
+      const recordStep = steps[recordIndex]
+      expectBuildDigestEnv(recordStep)
+      const recordDigestArguments = executableLines(recordStep?.run ?? "")
+        .filter((line) => line.startsWith("--arg imageDigest "))
+        .map((line) => line.replace(/\s+\\$/, ""))
+      expect(recordDigestArguments).toEqual([
+        recordDigestArgument,
+        recordDigestArgument,
+      ])
+
+      for (const [
+        attestationIndex,
+        expectedCommands,
+      ] of expectedAttestationCommandsByIndex) {
+        const attestationStep = steps[attestationIndex]
+        expectBuildDigestEnv(attestationStep)
+        expect(executableLines(attestationStep?.run ?? "")).toEqual(
+          expectedCommands,
+        )
+      }
+
+      const signStep = steps[signIndex]
+      expectBuildDigestEnv(signStep)
+      expect(executableLines(signStep?.run ?? "")).toEqual([
+        "set -eu",
+        signCommand,
+      ])
+
+      const aliasStep = steps[aliasIndex]
+      expectBuildDigestEnv(aliasStep)
+      expect(executableLines(aliasStep?.run ?? "")).toEqual([
+        "set -eu",
+        aliasCreationCommand,
+      ])
+
+      const aliasDigestVerificationStep = steps[aliasDigestVerificationIndex]
+      expectBuildDigestEnv(aliasDigestVerificationStep)
+      expect(executableLines(aliasDigestVerificationStep?.run ?? "")).toEqual([
+        "set -eu",
+        aliasDigestComparisonCommand,
+      ])
+    }
+
+    expectAuthoritativeConsumersUseBuildDigest(publishSteps)
+
+    const clonePublishSteps = (): Step[] =>
+      publishSteps.map((step) => ({
+        ...step,
+        env: step.env === undefined ? undefined : { ...step.env },
+        with: step.with === undefined ? undefined : { ...step.with },
+      }))
+
+    const replaceConsumerRunOnce = (
+      consumerIndex: number,
+      from: string,
+      to: string,
+    ): Step[] => {
+      const mutated = clonePublishSteps()
+      const step = mutated[consumerIndex]
+      if (
+        step === undefined ||
+        step.run === undefined ||
+        !step.run.includes(from)
+      ) {
+        throw new Error(
+          `missing authoritative consumer mutation source: ${from}`,
+        )
+      }
+      mutated[consumerIndex] = { ...step, run: step.run.replace(from, to) }
+      return mutated
+    }
+
+    const replaceSbomImage = (replacement: string): Step[] => {
+      const mutated = clonePublishSteps()
+      const step = mutated[sbomIndex]
+      if (step === undefined || step.with?.image !== sbomImage) {
+        throw new Error("missing authoritative SBOM image input")
+      }
+      mutated[sbomIndex] = {
+        ...step,
+        with: { ...(step.with ?? {}), image: replacement },
+      }
+      return mutated
+    }
+
+    const alternateDigest = `sha256:${"b".repeat(64)}`
+    const alternateDigestTarget = '"${IMAGE}@' + alternateDigest + '"'
+    const alternateRecordDigestArgument =
+      '--arg imageDigest "' + alternateDigest + '"'
+    const alternateAliasDigestComparisonCommand =
+      aliasDigestComparisonCommand.replace(
+        '"${IMAGE_DIGEST}"',
+        `"${alternateDigest}"`,
+      )
+    const sourceAttestationCommand = "cosign attest --yes \\"
+    const spdxAttestationCommand = "cosign attest --yes --type spdxjson \\"
+    const noOpAttestationCommand = "printf '%s' no-op \\"
+    const attestationExecutableMutations: ReadonlyArray<
+      readonly [string, () => Step[]]
+    > = [
+      [
+        "source-provenance attestation executable",
+        () =>
+          replaceConsumerRunOnce(
+            provenanceIndex,
+            sourceAttestationCommand,
+            noOpAttestationCommand,
+          ),
+      ],
+      [
+        "SPDX attestation executable",
+        () =>
+          replaceConsumerRunOnce(
+            sbomAttestIndex,
+            spdxAttestationCommand,
+            noOpAttestationCommand,
+          ),
+      ],
+      [
+        "release attestation executable",
+        () =>
+          replaceConsumerRunOnce(
+            releaseAttestIndex,
+            sourceAttestationCommand,
+            noOpAttestationCommand,
+          ),
+      ],
+    ]
+    const authoritativeConsumerMutations: ReadonlyArray<
+      readonly [string, () => Step[]]
+    > = [
+      [
+        "scan",
+        () =>
+          replaceConsumerRunOnce(scanIndex, imageDigestTarget, tagOnlyTarget),
+      ],
+      [
+        "release-record writing",
+        () =>
+          replaceConsumerRunOnce(
+            recordIndex,
+            recordDigestArgument,
+            alternateRecordDigestArgument,
+          ),
+      ],
+      [
+        "source-provenance attestation",
+        () =>
+          replaceConsumerRunOnce(
+            provenanceIndex,
+            imageDigestTarget,
+            tagOnlyTarget,
+          ),
+      ],
+      [
+        "SPDX attestation",
+        () =>
+          replaceConsumerRunOnce(
+            sbomAttestIndex,
+            imageDigestTarget,
+            alternateDigestTarget,
+          ),
+      ],
+      [
+        "release attestation",
+        () =>
+          replaceConsumerRunOnce(
+            releaseAttestIndex,
+            imageDigestTarget,
+            tagOnlyTarget,
+          ),
+      ],
+      [
+        "signing",
+        () =>
+          replaceConsumerRunOnce(signIndex, imageDigestTarget, tagOnlyTarget),
+      ],
+      [
+        "alias creation",
+        () =>
+          replaceConsumerRunOnce(aliasIndex, imageDigestTarget, tagOnlyTarget),
+      ],
+      [
+        "post-write comparison",
+        () =>
+          replaceConsumerRunOnce(
+            aliasDigestVerificationIndex,
+            aliasDigestComparisonCommand,
+            alternateAliasDigestComparisonCommand,
+          ),
+      ],
+      [
+        "SBOM generation",
+        () => replaceSbomImage("${{ env.IMAGE }}:${{ github.ref_name }}"),
+      ],
+      ...attestationExecutableMutations,
+    ]
+
+    expect(authoritativeConsumerMutations).toHaveLength(12)
+    for (const [label, mutate] of authoritativeConsumerMutations) {
+      const mutated = mutate()
+      expect(
+        () => expectAuthoritativeConsumersUseBuildDigest(mutated),
+        `${label} mutation must be rejected`,
+      ).toThrow()
+    }
   })
 
   it("allows only the complete Buildx v0.35.0 manifest-not-found result", () => {
@@ -470,9 +849,8 @@ describe("release contract", () => {
       releaseDocs,
       "Verify a completed release",
     )
-    const tagCommands = nonEmptyCommands(tagCreation)
-    const completedCommands = nonEmptyCommands(completedRelease)
-    const completedCommandText = completedCommands.join("\n")
+    const tagCommands = executableLines(tagCreation)
+    const completedCommands = executableLines(completedRelease)
 
     const tagHelperCommand =
       '.github/scripts/assert-image-alias-absent.sh "${IMAGE}:${RELEASE_TAG}"'
@@ -539,23 +917,10 @@ describe("release contract", () => {
       completedExpectedCommands,
     )
 
-    expect(
-      completedCommandText.match(/^cosign verify-attestation \\/gm),
-    ).toHaveLength(3)
-    expect(completedCommandText.match(/--certificate-identity /g)).toHaveLength(
-      4,
-    )
-    expect(
-      completedCommandText.match(/--certificate-oidc-issuer /g),
-    ).toHaveLength(4)
-    expect(
-      completedCommandText.match(/"\$\{IMAGE\}@\$\{DIGEST\}"/g),
-    ).toHaveLength(4)
-
     expect(() =>
       expectExactExecutableCommandSequence(
         insertExecutableCommandAfter(
-          tagExpectedCommands,
+          tagCommands,
           "export SOURCE_SHA",
           `printf -v SOURCE_SHA '%s' "$(git rev-parse origin/master)"`,
         ),
@@ -565,13 +930,30 @@ describe("release contract", () => {
     expect(() =>
       expectExactExecutableCommandSequence(
         insertExecutableCommandAfter(
-          completedExpectedCommands,
+          completedCommands,
           "export DIGEST",
           `printf -v DIGEST '%s' "$UNREVIEWED_DIGEST"`,
         ),
         completedExpectedCommands,
       ),
     ).toThrow()
+
+    const authoritativeReleaseIdentity = `The OCI digest is the authoritative and immutable release identity. The GHCR
+release tag is a non-authoritative convenience alias that can be changed by a
+separately authorized registry writer.
+
+Deploy and record \`\${IMAGE}@\${DIGEST}\`. An alias-resolution mismatch is a
+release stop and registry-access incident; do not consume or automatically
+repair the alias.
+
+The final alias comparison verifies only the post-write resolution observed by
+the workflow. It cannot detect every external-writer overwrite: without
+conditional creation, the workflow can overwrite a writer that publishes
+between the second absence check and alias creation, and a writer can change
+the alias after comparison.`
+    expect(releaseDocs).toContain(authoritativeReleaseIdentity)
+    expect(tagCreation).not.toContain(authoritativeReleaseIdentity)
+    expect(completedRelease).not.toContain(authoritativeReleaseIdentity)
   })
 
   it("documents strict production variables and forbids runtime overlays", () => {
