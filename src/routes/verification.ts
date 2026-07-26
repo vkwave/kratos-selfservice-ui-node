@@ -15,7 +15,7 @@ import { appendIfPresent, queryStringOrFallback } from "./query"
 
 export const createVerificationRoute: RouteCreator =
   (createHelpers) => (req, res, next) => {
-    res.locals.projectName = "Verify account"
+    res.locals.projectName = res.locals.copy.verificationPageTitle
 
     const { flow, return_to = "", message } = req.query
     const { frontend, kratosBrowserUrl, logoUrl } = createHelpers(req, res)

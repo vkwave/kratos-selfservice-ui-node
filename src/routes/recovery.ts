@@ -15,7 +15,7 @@ import { appendIfPresent, queryStringOrFallback } from "./query"
 
 export const createRecoveryRoute: RouteCreator =
   (createHelpers) => (req, res, next) => {
-    res.locals.projectName = "Recover account"
+    res.locals.projectName = res.locals.copy.recoveryPageTitle
 
     const { flow, return_to = "" } = req.query
     const { frontend, kratosBrowserUrl, logoUrl, faviconUrl, faviconType } =

@@ -15,7 +15,7 @@ import { appendIfPresent, queryStringOrFallback } from "./query"
 
 export const createSettingsRoute: RouteCreator =
   (createHelpers) => async (req, res, next) => {
-    res.locals.projectName = "Account settings"
+    res.locals.projectName = res.locals.copy.settingsPageTitle
 
     const { flow, return_to = "" } = req.query
     const helpers = createHelpers(req, res)

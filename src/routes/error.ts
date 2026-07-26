@@ -36,7 +36,7 @@ const fetchErrorClass = async (
 
 export const createErrorRoute: RouteCreator =
   (createHelpers) => async (req, res) => {
-    res.locals.projectName = "Account request error"
+    res.locals.projectName = res.locals.copy.errorPageTitle
     const requestId = randomUUID()
     const { frontend } = createHelpers(req, res)
     let errorClass = "unknown_error"

@@ -13,7 +13,7 @@ import { Request, Response, NextFunction } from "express"
 export const createShowLogoutRoute: RouteCreator =
   (createHelpers) =>
   async (req: Request, res: Response, next: NextFunction) => {
-    res.locals.projectName = "Logout"
+    res.locals.projectName = res.locals.copy.logoutPageTitle
 
     const { logout_challenge: logoutChallenge } = req.query
 
@@ -61,7 +61,7 @@ export const createSubmitLogoutRoute: RouteCreator =
   (createHelpers) =>
   async (req: Request, res: Response, next: NextFunction) => {
     const { oauth2 } = createHelpers(req, res)
-    res.locals.projectName = "Logout"
+    res.locals.projectName = res.locals.copy.logoutPageTitle
 
     // The challenge is now a hidden input field, so let's take it from
     // the request body instead.

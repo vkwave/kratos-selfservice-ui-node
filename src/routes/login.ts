@@ -17,7 +17,7 @@ import { appendIfPresent, queryStringOrFallback } from "./query"
 
 export const createLoginRoute: RouteCreator =
   (createHelpers) => async (req, res, next) => {
-    res.locals.projectName = "Sign in"
+    res.locals.projectName = res.locals.copy.loginPageTitle
 
     const {
       flow,

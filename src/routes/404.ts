@@ -5,15 +5,16 @@ import { UserErrorCard } from "@ory/elements-markup"
 
 export const register404Route: RouteRegistrator = (app, createHelpers) => {
   app.get("*", (req, res) => {
+    res.locals.projectName = res.locals.copy.notFoundTitle
     res.status(404).render("error", {
       card: UserErrorCard({
-        title: "404 - Page not found",
+        title: res.locals.copy.notFoundTitle,
         cardImage: createHelpers?.(req, res).logoUrl,
         backUrl: "sessions",
         error: {
           id: "404",
           error: {
-            reason: "The requested page could not be found (404).",
+            reason: res.locals.copy.notFoundReason,
             code: 404,
           },
         },
