@@ -1,10 +1,87 @@
+import { spawnSync, type SpawnSyncReturns } from "child_process"
 import { createHash } from "crypto"
-import { readFileSync } from "fs"
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "fs"
+import { tmpdir } from "os"
+import { join, resolve } from "path"
 import { describe, expect, it } from "vitest"
+import { parse } from "yaml"
 
 const read = (path: string): string => readFileSync(path, "utf8")
 const sha256 = (path: string): string =>
   createHash("sha256").update(readFileSync(path)).digest("hex")
+
+type Step = { uses?: string; run?: string; with?: Record<string, unknown> }
+type Job = {
+  needs?: string | string[]
+  permissions?: Record<string, string>
+  env?: Record<string, unknown>
+  steps?: Step[]
+}
+
+type AliasCheckOptions = {
+  args?: string[]
+  dockerExit?: number
+  dockerStderr?: string
+  dockerStdout?: string
+}
+
+const runAliasCheck = ({
+  args = ["ghcr.io/vkwave/kratos-selfservice-ui-node:0.23.10-vkwave.1"],
+  dockerExit = 1,
+  dockerStderr = "",
+  dockerStdout = "",
+}: AliasCheckOptions = {}): SpawnSyncReturns<string> => {
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "release-alias-check-"))
+  const binDirectory = join(temporaryRoot, "bin")
+  const dockerConfig = join(temporaryRoot, "docker-config")
+  mkdirSync(binDirectory)
+  mkdirSync(dockerConfig, { mode: 0o700 })
+  chmodSync(dockerConfig, 0o700)
+  writeFileSync(join(dockerConfig, "config.json"), "{}\n")
+
+  const docker = join(binDirectory, "docker")
+  writeFileSync(
+    docker,
+    `#!/bin/sh
+printf '%s' "\${MOCK_DOCKER_STDOUT:-}"
+printf '%s' "\${MOCK_DOCKER_STDERR:-}" >&2
+exit "\${MOCK_DOCKER_EXIT:-1}"
+`,
+  )
+  chmodSync(docker, 0o755)
+
+  try {
+    return spawnSync(
+      resolve(".github/scripts/assert-image-alias-absent.sh"),
+      args,
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          DOCKER_CONFIG: dockerConfig,
+          MOCK_DOCKER_EXIT: String(dockerExit),
+          MOCK_DOCKER_STDERR: dockerStderr,
+          MOCK_DOCKER_STDOUT: dockerStdout,
+          PATH: `${binDirectory}:${process.env.PATH ?? ""}`,
+        },
+      },
+    )
+  } finally {
+    rmSync(temporaryRoot, { force: true, recursive: true })
+  }
+}
+
+const expectAliasRefused = (result: SpawnSyncReturns<string>): void => {
+  expect(result.error).toBeUndefined()
+  expect(result.status).not.toBe(0)
+}
 
 describe("release contract", () => {
   it("builds a pinned three-stage non-root image", () => {
@@ -23,10 +100,28 @@ describe("release contract", () => {
     expect(dockerfile).toContain("node_modules/@ory/client")
   })
 
-  it("runs tests and publishes signed immutable images", () => {
+  it("pins the workflow parser dependency and registry integrity", () => {
+    const pkg = JSON.parse(read("package.json"))
+    const lock = JSON.parse(read("package-lock.json"))
+
+    expect(pkg.devDependencies.yaml).toBe("2.9.0")
+    expect(lock.packages["node_modules/yaml"]).toMatchObject({
+      dev: true,
+      integrity:
+        "sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA==",
+      resolved: "https://registry.npmjs.org/yaml/-/yaml-2.9.0.tgz",
+      version: "2.9.0",
+    })
+    expect(parse("version: 2.9.0")).toEqual({ version: "2.9.0" })
+  })
+
+  it("separates unprivileged verification from fail-closed publication", () => {
     const ci = read(".github/workflows/ci.yml")
     const format = read(".github/workflows/format.yml")
     const release = read(".github/workflows/release.yml")
+    const document = parse(release) as { jobs: Record<string, Job> }
+    const verify = document.jobs.verify
+    const publish = document.jobs.publish
 
     for (const command of [
       "npm ci",
@@ -38,30 +133,167 @@ describe("release contract", () => {
       expect(ci).toContain(command)
     }
     expect(release).toContain("0.23.10-vkwave.*")
-    expect(release).toMatch(/anchore\/sbom-action@[0-9a-f]{40} # v0/)
-    expect(release).toContain("cosign sign --yes")
-    expect(release).toContain("provenance: mode=max")
-    expect(release).toContain("push-by-digest=true")
-    expect(release).not.toContain(
-      "tags: ${{ env.IMAGE }}:${{ github.ref_name }}",
+
+    expect(verify).toBeDefined()
+    expect(publish).toBeDefined()
+    expect(publish.needs).toBe("verify")
+    expect(verify.permissions).toEqual({ contents: "read" })
+    expect(publish.permissions).toEqual({
+      contents: "read",
+      packages: "write",
+      "id-token": "write",
+    })
+    expect(publish.env?.DOCKER_CONFIG).toBe("${{ runner.temp }}/docker-config")
+
+    const uses = [...(verify.steps ?? []), ...(publish.steps ?? [])].flatMap(
+      (step) => (step.uses ? [step.uses] : []),
     )
-    const signIndex = release.indexOf("cosign sign --yes")
-    const tagIndex = release.indexOf("docker buildx imagetools create")
-    expect(signIndex).toBeGreaterThan(-1)
-    expect(tagIndex).toBeGreaterThan(signIndex)
-    expect(release.slice(tagIndex)).toMatch(
-      /--tag\s+"\$\{IMAGE\}:\$\{RELEASE_TAG\}"\s+"\$\{IMAGE\}@\$\{IMAGE_DIGEST\}"/,
+    for (const action of uses) expect(action).toMatch(/^[^@]+@[0-9a-f]{40}$/)
+    expect(uses).toEqual(
+      expect.arrayContaining([
+        "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
+        "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+        "docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9",
+        "docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f",
+        "docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8",
+        "anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610",
+        "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+        "sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac",
+      ]),
     )
-    const actionReferences = release
-      .split("\n")
-      .filter((line) => line.includes("uses:"))
-    expect(actionReferences.length).toBeGreaterThan(0)
-    for (const reference of actionReferences) {
-      expect(reference).toMatch(/@[0-9a-f]{40}\s+#\s+v\S+$/)
-    }
+    expect(
+      (publish.steps ?? []).some((step) =>
+        step.uses?.startsWith("actions/setup-node@"),
+      ),
+    ).toBe(false)
+    expect(
+      (publish.steps ?? []).some((step) => step.with?.cache === "npm"),
+    ).toBe(false)
+
+    const publishSteps = publish.steps ?? []
+    const commands = publishSteps
+      .flatMap((step) => (step.run ?? "").split("\n"))
+      .map((line) => line.trim())
+      .filter((line) => line !== "" && !line.startsWith("#"))
+    const index = (pattern: RegExp): number =>
+      commands.findIndex((line) => pattern.test(line))
+    expect(index(/git fetch origin master --no-tags/)).toBeGreaterThanOrEqual(0)
+    expect(
+      index(/git merge-base --is-ancestor HEAD origin\/master/),
+    ).toBeGreaterThanOrEqual(0)
+    expect(index(/git rev-list -n 1 .*RELEASE_TAG/)).toBeGreaterThanOrEqual(0)
+    expect(
+      index(/docker buildx imagetools inspect .*RELEASE_TAG/),
+    ).toBeGreaterThanOrEqual(0)
+
+    const stepIndex = (predicate: (step: Step) => boolean): number =>
+      publishSteps.findIndex(predicate)
+    const pushIndex = stepIndex((step) =>
+      Object.values(step.with ?? {}).some((value) =>
+        String(value).includes("push-by-digest=true"),
+      ),
+    )
+    const scanIndex = stepIndex((step) =>
+      /trivy[\s\S]*CRITICAL,HIGH/.test(step.run ?? ""),
+    )
+    const recordIndex = stepIndex((step) =>
+      /release-provenance\.json/.test(step.run ?? ""),
+    )
+    const provenanceIndex = stepIndex((step) =>
+      (step.run ?? "").includes(
+        "https://vkwave.com/attestations/source-provenance/v1",
+      ),
+    )
+    const sbomAttestIndex = stepIndex((step) =>
+      (step.run ?? "").includes("cosign attest --yes --type spdxjson"),
+    )
+    const releaseAttestIndex = stepIndex((step) =>
+      (step.run ?? "").includes("https://vkwave.com/attestations/release/v1"),
+    )
+    const signIndex = stepIndex((step) =>
+      /cosign sign --yes/.test(step.run ?? ""),
+    )
+    const aliasIndex = stepIndex((step) =>
+      /imagetools create --tag[\s\S]*RELEASE_TAG/.test(step.run ?? ""),
+    )
+    const configInitIndex = stepIndex((step) =>
+      (step.run ?? "").includes('install -d -m 0700 "$DOCKER_CONFIG"'),
+    )
+    const loginIndex = stepIndex(
+      (step) =>
+        step.uses ===
+        "docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9",
+    )
+    expect(configInitIndex).toBeGreaterThanOrEqual(0)
+    expect(loginIndex).toBeGreaterThan(configInitIndex)
+    expect(pushIndex).toBeGreaterThan(loginIndex)
+    expect(pushIndex).toBeGreaterThanOrEqual(0)
+    expect(scanIndex).toBeGreaterThan(pushIndex)
+    expect(recordIndex).toBeGreaterThan(scanIndex)
+    expect(provenanceIndex).toBeGreaterThan(scanIndex)
+    expect(sbomAttestIndex).toBeGreaterThan(scanIndex)
+    expect(releaseAttestIndex).toBeGreaterThan(recordIndex)
+    expect(signIndex).toBeGreaterThan(recordIndex)
+    expect(signIndex).toBeGreaterThan(provenanceIndex)
+    expect(signIndex).toBeGreaterThan(sbomAttestIndex)
+    expect(signIndex).toBeGreaterThan(releaseAttestIndex)
+    expect(aliasIndex).toBeGreaterThan(signIndex)
+
+    const aliasChecks = publishSteps.flatMap((step, stepIndex) =>
+      (step.run ?? "").includes(".github/scripts/assert-image-alias-absent.sh")
+        ? [stepIndex]
+        : [],
+    )
+    expect(aliasChecks).toHaveLength(2)
+    expect(aliasChecks[0]).toBeGreaterThan(loginIndex)
+    expect(aliasChecks[0]).toBeLessThan(pushIndex)
+    expect(aliasChecks[1]).toBeGreaterThan(signIndex)
+    expect(aliasChecks[1]).toBeLessThan(aliasIndex)
+
     expect(format).toContain("actions/setup-node@v5")
     expect(format).toContain("npm run format:check")
     expect(format).not.toContain("actions/setup-go")
+  })
+
+  it("allows only a registry manifest-not-found result for a new alias", () => {
+    for (const dockerStderr of [
+      "manifest unknown: manifest unknown",
+      "manifest is not found",
+    ]) {
+      const result = runAliasCheck({ dockerStderr })
+      expect(result.error).toBeUndefined()
+      expect(result.status, result.stderr).toBe(0)
+    }
+  })
+
+  it("refuses an existing release image alias", () => {
+    const result = runAliasCheck({
+      dockerExit: 0,
+      dockerStdout: "Name: ghcr.io/vkwave/kratos-selfservice-ui-node",
+    })
+
+    expectAliasRefused(result)
+    expect(result.stderr).toContain("release image alias already exists")
+  })
+
+  it("fails closed on registry authentication, authorization, rate-limit, and network errors", () => {
+    for (const dockerStderr of [
+      "manifest unknown: unauthorized: authentication required",
+      "manifest unknown: denied: permission_denied",
+      "manifest unknown: too many requests: rate limit exceeded",
+      "manifest unknown: TLS handshake timeout",
+      "manifest unknown: dial tcp: no such host",
+    ]) {
+      expectAliasRefused(runAliasCheck({ dockerStderr }))
+    }
+  })
+
+  it("fails closed on malformed arguments and ambiguous registry errors", () => {
+    expectAliasRefused(runAliasCheck({ args: [] }))
+    expectAliasRefused(runAliasCheck({ args: ["not-an-image-alias"] }))
+    expectAliasRefused(
+      runAliasCheck({ dockerStderr: "unexpected registry response" }),
+    )
   })
 
   it("documents strict production variables and forbids runtime overlays", () => {
@@ -105,10 +337,10 @@ describe("release contract", () => {
       expect(metadata.version, path).not.toBe("5.0.7")
     }
     expect(sha256("package.json")).toBe(
-      "03923e368d8e5e72237f114d84c8db9fa11ee2a31fd6fd1642613d4c7cf06b79",
+      "6a76467f00ecca1a6bac4d49aeb30c764a1029d32522d81748586c0300051402",
     )
     expect(sha256("package-lock.json")).toBe(
-      "66dc5ffe533af315e8bf231e529ab972a3d648675ed8996543b75989df6c626a",
+      "1c50eb05de5750f141c75b48e2a351572358f77ec27f255788408700252ece9e",
     )
   })
 

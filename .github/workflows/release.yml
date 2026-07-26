@@ -5,21 +5,31 @@ on:
     tags:
       - "0.23.10-vkwave.*"
 
-permissions:
-  contents: read
-  id-token: write
-  packages: write
-
 env:
   IMAGE: ghcr.io/vkwave/kratos-selfservice-ui-node
 
 jobs:
-  release:
+  verify:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          fetch-depth: 0
           persist-credentials: false
+      - name: Verify reviewed release source
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          test "${GITHUB_REF_TYPE}" = tag
+          printf '%s\n' "$RELEASE_TAG" | grep -Eq '^0\.23\.10-vkwave\.[0-9]+$'
+          test "${GITHUB_REF}" = "refs/tags/$RELEASE_TAG"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          git fetch origin master --no-tags
+          git merge-base --is-ancestor HEAD origin/master
+          test "$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")" = "${GITHUB_SHA}"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
@@ -28,12 +38,47 @@ jobs:
       - run: npm test
       - run: npm run format:check
       - run: npm run build
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    env:
+      DOCKER_CONFIG: ${{ runner.temp }}/docker-config
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Revalidate reviewed release source
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          test "${GITHUB_REF_TYPE}" = tag
+          printf '%s\n' "$RELEASE_TAG" | grep -Eq '^0\.23\.10-vkwave\.[0-9]+$'
+          test "${GITHUB_REF}" = "refs/tags/$RELEASE_TAG"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          git fetch origin master --no-tags
+          git merge-base --is-ancestor HEAD origin/master
+          test "$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")" = "${GITHUB_SHA}"
+      - name: Initialize isolated Docker config
+        run: install -d -m 0700 "$DOCKER_CONFIG"
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Refuse an existing release image alias
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run:
+          .github/scripts/assert-image-alias-absent.sh "${IMAGE}:${RELEASE_TAG}"
       - id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -43,22 +88,107 @@ jobs:
             name-canonical=true,push=true
           provenance: mode=max
           sbom: true
-      - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.72.0
+      - name: Scan exact pushed digest with Trivy
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -eu
+          trivy image --exit-code 1 --severity CRITICAL,HIGH "${IMAGE}@${IMAGE_DIGEST}"
+      - name: Generate SPDX SBOM for exact pushed digest
+        id: sbom
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
           image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
           format: spdx-json
           output-file: sbom.spdx.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: sbom-${{ github.ref_name }}
-          path: sbom.spdx.json
-      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
-      - env:
-          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
-        run: cosign sign --yes "${IMAGE}@${IMAGE_DIGEST}"
-      - env:
+      - name: Write release provenance records
+        env:
           IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: >-
-          docker buildx imagetools create --tag "${IMAGE}:${RELEASE_TAG}"
-          "${IMAGE}@${IMAGE_DIGEST}"
+          WORKFLOW_IDENTITY: ${{ github.server_url }}/${{ github.workflow_ref }}
+        run: |
+          set -eu
+          jq -n \
+            --arg repository "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --arg tagRef "${GITHUB_REF}" \
+            --arg sourceCommit "${GITHUB_SHA}" \
+            --arg image "${IMAGE}" \
+            --arg imageDigest "${IMAGE_DIGEST}" \
+            --arg workflowIdentity "${WORKFLOW_IDENTITY}" \
+            --arg workflowRunId "${GITHUB_RUN_ID}" \
+            --arg builder "https://github.com/docker/build-push-action" \
+            --arg issuer "https://token.actions.githubusercontent.com" \
+            '{repository:$repository,tagRef:$tagRef,sourceCommit:$sourceCommit,image:$image,imageDigest:$imageDigest,workflowIdentity:$workflowIdentity,workflowRunId:$workflowRunId,builder:$builder,issuer:$issuer}' \
+            > source-provenance.json
+          jq -n \
+            --arg tag "${RELEASE_TAG}" \
+            --arg sourceCommit "${GITHUB_SHA}" \
+            --arg imageDigest "${IMAGE_DIGEST}" \
+            --arg workflowIdentity "${WORKFLOW_IDENTITY}" \
+            --arg issuer "https://token.actions.githubusercontent.com" \
+            '{tag:$tag,sourceCommit:$sourceCommit,imageDigest:$imageDigest,workflowIdentity:$workflowIdentity,issuer:$issuer}' \
+            > release-provenance.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          if-no-files-found: error
+          name: release-provenance-${{ github.ref_name }}
+          path: |
+            source-provenance.json
+            release-provenance.json
+            sbom.spdx.json
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+      - name: Attest source provenance
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -eu
+          cosign attest --yes \
+            --type https://vkwave.com/attestations/source-provenance/v1 \
+            --predicate source-provenance.json \
+            "${IMAGE}@${IMAGE_DIGEST}"
+      - name: Attest SPDX SBOM
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -eu
+          cosign attest --yes --type spdxjson \
+            --predicate sbom.spdx.json \
+            "${IMAGE}@${IMAGE_DIGEST}"
+      - name: Attest release provenance
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -eu
+          cosign attest --yes \
+            --type https://vkwave.com/attestations/release/v1 \
+            --predicate release-provenance.json \
+            "${IMAGE}@${IMAGE_DIGEST}"
+      - name: Sign exact pushed digest
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -eu
+          cosign sign --yes "${IMAGE}@${IMAGE_DIGEST}"
+      - name: Recheck release image alias before creation
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run:
+          .github/scripts/assert-image-alias-absent.sh "${IMAGE}:${RELEASE_TAG}"
+      - name: Create final release image alias
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          docker buildx imagetools create --tag "${IMAGE}:${RELEASE_TAG}" "${IMAGE}@${IMAGE_DIGEST}"
+      - name: Verify final alias resolves to the signed digest
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          test "$(docker buildx imagetools inspect "${IMAGE}:${RELEASE_TAG}" --format '{{.Manifest.Digest}}')" = "${IMAGE_DIGEST}"
