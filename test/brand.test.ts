@@ -19,7 +19,8 @@ describe("brand copy", () => {
         "notFoundReason",
         "unknownClientLabel",
       ] as const) {
-        expect(copy[key]).not.toBe("")
+        expect(copy[key]).toEqual(expect.any(String))
+        expect(copy[key].trim()).not.toBe("")
       }
     }
   })
