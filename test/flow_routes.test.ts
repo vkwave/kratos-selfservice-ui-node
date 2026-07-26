@@ -8,7 +8,7 @@ import { brandConfig } from "../src/brand/config"
 import { copyForLanguage } from "../src/brand/copy"
 import { handlebarsHelpers } from "../src/pkg"
 import { register404Route } from "../src/routes/404"
-import { createConsentRoute } from "../src/routes/consent"
+import { consentViewModel, createConsentRoute } from "../src/routes/consent"
 import { createErrorRoute } from "../src/routes/error"
 import { createLoginRoute } from "../src/routes/login"
 import { createShowLogoutRoute } from "../src/routes/logout"
@@ -23,7 +23,8 @@ vi.mock("@ory/elements-markup", async (importOriginal) => {
   return {
     ...actual,
     UserAuthCard: () => "",
-    UserConsentCard: ({ client_name }: { client_name: string }) => client_name,
+    UserConsentCard: ({ client_name }: { client_name: string }) =>
+      `USER_CONSENT_CARD:${client_name}`,
     UserErrorCard: () => "",
     UserLogoutCard: () => "",
     UserSettingsScreen: () => ({ Body: "", Nav: "" }),
@@ -80,6 +81,56 @@ const createHelpers = () =>
     shouldSkipConsent: () => false,
     shouldSkipLogoutConsent: () => false,
   }) as never
+
+const createConsentHelpers = (client: {
+  client_id?: string
+  client_name?: string
+}) => {
+  const helpers = createHelpers()
+  return (() => ({
+    ...helpers,
+    oauth2: {
+      ...helpers.oauth2,
+      getOAuth2ConsentRequest: async () => ({
+        data: { ...consentRequest, client },
+      }),
+    },
+  })) as never
+}
+
+const consentClientCases = [
+  { label: "both absent", client: {}, selected: undefined },
+  {
+    label: "both empty",
+    client: { client_name: "", client_id: "" },
+    selected: undefined,
+  },
+  {
+    label: "name absent with populated ID",
+    client: { client_id: "client-id" },
+    selected: "client-id",
+  },
+  {
+    label: "name empty with populated ID",
+    client: { client_name: "", client_id: "client-id" },
+    selected: "client-id",
+  },
+  {
+    label: "populated name with ID absent",
+    client: { client_name: "Client name" },
+    selected: "Client name",
+  },
+  {
+    label: "populated name with ID empty",
+    client: { client_name: "Client name", client_id: "" },
+    selected: "Client name",
+  },
+] as const
+
+const consentLocales = [
+  { language: "en", fallback: "Unknown client" },
+  { language: "zh-CN", fallback: "未知客户端" },
+] as const
 
 const createRenderedRouteApp = (
   route: ReturnType<
@@ -186,7 +237,7 @@ describe("self-service flow routes", () => {
     )
   })
 
-  it("localizes the consent title and unknown-client fallback", async () => {
+  it("localizes the consent title", async () => {
     const app = createRenderedRouteApp(
       createConsentRoute(createHelpers),
       "/consent",
@@ -200,13 +251,47 @@ describe("self-service flow routes", () => {
 
     expect(english.status).toBe(200)
     expect(english.text).toContain("<title>Authorization consent</title>")
-    expect(english.text).toContain("Unknown client")
-    expect(english.text).not.toContain("Unknown Client")
     expect(chinese.status).toBe(200)
     expect(chinese.text).toContain("<title>授权确认</title>")
-    expect(chinese.text).toContain("未知客户端")
-    expect(chinese.text).not.toContain("Unknown client")
-    expect(chinese.text).not.toContain("Unknown Client")
+  })
+
+  it("preserves consent view-model fallback and precedence", () => {
+    for (const { label, client, selected } of consentClientCases) {
+      for (const { language, fallback } of consentLocales) {
+        const model = consentViewModel(
+          { client } as never,
+          copyForLanguage(language).unknownClientLabel,
+        )
+        expect(model.clientName, `${label} (${language})`).toBe(
+          selected ?? fallback,
+        )
+      }
+    }
+  })
+
+  it("passes consent fallback and precedence to UserConsentCard", async () => {
+    for (const { label, client, selected } of consentClientCases) {
+      for (const { language, fallback } of consentLocales) {
+        const app = createRenderedRouteApp(
+          createConsentRoute(createConsentHelpers(client)),
+          "/consent",
+        )
+        const response = await request(app)
+          .get("/consent?consent_challenge=consent-1")
+          .set("Accept-Language", language)
+        const expected = selected ?? fallback
+
+        expect(response.status, `${label} (${language})`).toBe(200)
+        expect(response.text, `${label} (${language})`).toContain(
+          `USER_CONSENT_CARD:${expected}`,
+        )
+        if (!selected) {
+          expect(response.text, `${label} (${language})`).not.toContain(
+            "Unknown Client",
+          )
+        }
+      }
+    }
   })
 
   it("localizes the error and not-found page titles", async () => {

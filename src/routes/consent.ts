@@ -144,8 +144,8 @@ export const consentViewModel = (
   })
   return {
     clientName:
-      request.client?.client_name ??
-      request.client?.client_id ??
+      request.client?.client_name ||
+      request.client?.client_id ||
       unknownClientLabel,
     clientId: request.client?.client_id || "",
     redirectHosts,
@@ -246,8 +246,8 @@ export const createConsentRoute: RouteCreator =
             csrfToken: req.csrfToken(true),
             cardImage: body.client?.logo_uri || logoUrl,
             client_name:
-              body.client?.client_name ??
-              body.client?.client_id ??
+              body.client?.client_name ||
+              body.client?.client_id ||
               res.locals.copy.unknownClientLabel,
             requested_scope: body.requested_scope || [],
             client: body.client,
