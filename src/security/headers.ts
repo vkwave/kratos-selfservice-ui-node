@@ -23,10 +23,16 @@ export const securityHeaders = (
   env: NodeJS.ProcessEnv = process.env,
 ): RequestHandler => {
   const formAction = formActionSources(env)
-  return (_req, res, next) => {
+  const basePath = (env.BASE_PATH || "").replace(/\/+$/, "")
+  const consentPath = `${basePath}/consent`.toLowerCase()
+  return (req, res, next) => {
+    const requestPath = req.path.toLowerCase()
+    const isConsent =
+      requestPath === consentPath || requestPath === `${consentPath}/`
+    const formActionDirective = isConsent ? "" : `; form-action ${formAction}`
     res.setHeader(
       "Content-Security-Policy",
-      `default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action ${formAction}`,
+      `default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'${formActionDirective}`,
     )
     res.setHeader("Referrer-Policy", "no-referrer")
     res.setHeader("X-Content-Type-Options", "nosniff")
