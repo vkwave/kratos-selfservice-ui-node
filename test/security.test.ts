@@ -1,7 +1,9 @@
+import express from "express"
 import request from "supertest"
 import { describe, expect, it } from "vitest"
 import { createApp } from "../src/app"
 import { loadSecurityConfig } from "../src/security/config"
+import { securityHeaders } from "../src/security/headers"
 
 describe("security configuration", () => {
   it("rejects insecure production mode", () => {
@@ -60,6 +62,42 @@ describe("security configuration", () => {
         KRATOS_BROWSER_URL: "javascript:alert(1)",
       }),
     ).toThrow(/KRATOS_BROWSER_URL must use http or https/)
+  })
+
+  it("allows consent completion to redirect to the registered OAuth client", async () => {
+    const env = {
+      BASE_PATH: "/myapp",
+      KRATOS_BROWSER_URL: "https://auth.example.test",
+    }
+    const app = express()
+    const router = express.Router()
+    app.use(securityHeaders(env))
+    router.get(["/consent", "/login"], (_req, res) => res.sendStatus(204))
+    app.use(env.BASE_PATH, router)
+    app.use((_req, res) => res.sendStatus(404))
+
+    const consent = await request(app).get(
+      "/myapp/CONSENT/?consent_challenge=test",
+    )
+    const login = await request(app).get("/myapp/login")
+    const nonConsent = await request(app).get("/myapp/consent//")
+
+    expect(consent.headers["content-security-policy"]).toBe(
+      "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'",
+    )
+    expect(consent.headers["referrer-policy"]).toBe("no-referrer")
+    expect(consent.headers["x-content-type-options"]).toBe("nosniff")
+    expect(consent.headers["x-frame-options"]).toBe("DENY")
+    expect(consent.headers["permissions-policy"]).toBe(
+      "camera=(), microphone=(), geolocation=()",
+    )
+    expect(login.headers["content-security-policy"]).toBe(
+      "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://auth.example.test",
+    )
+    expect(nonConsent.status).toBe(404)
+    expect(nonConsent.headers["content-security-policy"]).toBe(
+      "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://auth.example.test",
+    )
   })
 
   it("rejects weak secrets and non-host production cookies", () => {
