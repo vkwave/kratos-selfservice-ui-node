@@ -51,6 +51,8 @@ included.
 - Upstream commit subject:
   `chore: patch brace-expansion, tar, and postcss in frontend images`
 - Upstream files changed: `package.json`, `package-lock.json`
+- VKWAVE pull request:
+  `https://github.com/vkwave/kratos-selfservice-ui-node/pull/6`
 - Synchronization date: `2026-09-10`
 
 Despite the upstream commit subject, the audited delta contains no `tar` or
