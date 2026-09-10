@@ -1013,7 +1013,9 @@ the alias after comparison.`
       ),
     )
     const unrelatedOverrides = Object.fromEntries(
-      Object.entries(pkg.overrides).filter(([name]) => name !== "brace-expansion"),
+      Object.entries(pkg.overrides).filter(
+        ([name]) => name !== "brace-expansion",
+      ),
     )
 
     expect(unrelatedDependencies).toEqual({
