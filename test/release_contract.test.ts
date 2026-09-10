@@ -988,19 +988,20 @@ the alias after comparison.`
     expect(pkg.dependencies.axios).toBe("1.18.1")
     expect(pkg.dependencies["body-parser"]).toBe("1.20.6")
     expect(pkg.overrides.qs).toBe("6.15.2")
-    expect(pkg.overrides["brace-expansion@1"]).toBe("1.1.16")
-    expect(pkg.overrides["brace-expansion@5"]).toBe("5.0.8")
-    expect(pkg.overrides["brace-expansion@5"]).not.toBe("5.0.7")
+    expect(pkg.overrides["brace-expansion"]).toBe("5.0.8")
+    expect(pkg.overrides["brace-expansion"]).not.toBe("5.0.7")
+    expect(pkg.overrides["brace-expansion@1"]).toBeUndefined()
+    expect(pkg.overrides["brace-expansion@5"]).toBeUndefined()
     expect(major5BraceEntries.length).toBeGreaterThanOrEqual(1)
     for (const [path, metadata] of major5BraceEntries) {
       expect(metadata.version, path).toBe("5.0.8")
       expect(metadata.version, path).not.toBe("5.0.7")
     }
     expect(sha256("package.json")).toBe(
-      "6a76467f00ecca1a6bac4d49aeb30c764a1029d32522d81748586c0300051402",
+      "c38a1791640b4587c0321f4a13d324a696a4576824e94b73ee83e98d04fc43c0",
     )
     expect(sha256("package-lock.json")).toBe(
-      "1c50eb05de5750f141c75b48e2a351572358f77ec27f255788408700252ece9e",
+      "0076a4f9e35d18da80a9d00661bdb7a963220fd00f8f728b6d7f59ccb7baddbc",
     )
   })
 
@@ -1013,7 +1014,7 @@ the alias after comparison.`
     )
     const unrelatedOverrides = Object.fromEntries(
       Object.entries(pkg.overrides).filter(
-        ([name]) => !["brace-expansion@1", "brace-expansion@5"].includes(name),
+        ([name]) => name !== "brace-expansion",
       ),
     )
 

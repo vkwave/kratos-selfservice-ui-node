@@ -43,3 +43,38 @@ reproduced directly on fixed VKWAVE base
 Fork-specific tests, build constraints, runtime behavior, and public history
 were preserved, and no unrelated upstream commit or dependency drift was
 included.
+
+## 2026-09-10 dependency-security synchronization
+
+- Upstream repository: `https://github.com/ory/kratos-selfservice-ui-node`
+- Audited upstream commit: `dcb01111a2858ef921c0e37cb7f38219b73c0ebd`
+- Upstream commit subject:
+  `chore: patch brace-expansion, tar, and postcss in frontend images`
+- Upstream files changed: `package.json`, `package-lock.json`
+- VKWAVE pull request:
+  `https://github.com/vkwave/kratos-selfservice-ui-node/pull/6`
+- Synchronization date: `2026-09-10`
+
+Despite the upstream commit subject, the audited delta contains no `tar` or
+`postcss` changes: it replaces the targeted `brace-expansion@1` and
+`brace-expansion@5` overrides with a single unscoped `brace-expansion` override
+pinned at `5.0.8`, collapsing the transitive brace-expansion@1 subtree
+(`balanced-match`, `concat-map`,
+`read-package-json/node_modules/brace-expansion`) out of the lockfile. The `qs`
+override at `6.15.2`, the `form-data` override at `>=4.0.6`, and the
+`express-winston` `lodash` override are retained unchanged.
+
+The canonical package hashes for the synced state are:
+
+- `package.json` SHA-256:
+  `c38a1791640b4587c0321f4a13d324a696a4576824e94b73ee83e98d04fc43c0`
+- `package-lock.json` SHA-256:
+  `0076a4f9e35d18da80a9d00661bdb7a963220fd00f8f728b6d7f59ccb7baddbc`
+
+Conflict resolution: the upstream override consolidation was reproduced directly
+on the VKWAVE base, which already carried `brace-expansion@5` at `5.0.8` from
+the `GHSA-mh99-v99m-4gvg` follow-up; the package lockfile was regenerated
+against the consolidated override with no unrelated dependency drift, and the
+release contract test was updated to assert the consolidated override and the
+new canonical hashes. Fork-specific tests, build constraints, runtime behavior,
+and public history were preserved.
